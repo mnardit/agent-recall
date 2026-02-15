@@ -1,0 +1,49 @@
+# Example configuration for claude-memory
+# Place in your project root or ~/.claude/memory/memory.yaml
+
+# Database path (default: ~/.claude/memory/frames.db)
+db_path: ~/.claude/memory/frames.db
+
+# Cache directory for AI briefings (default: ~/.claude/memory/context_cache)
+cache_dir: ~/.claude/memory/context_cache
+
+# Scope hierarchy: parent -> children
+# Agents at parent scope can access children's data
+hierarchy:
+  acme-agency:
+    - client-alpha
+    - client-beta
+    - client-gamma
+
+# Agent tiers control context injection depth
+# Tier 0: no context injection (infrastructure agents)
+# Tier 1: minimal context (system agents)
+# Tier 2: full context (project agents) — default
+# Tier 3: orchestrator (sees everything)
+tiers:
+  0: [monitoring-bot, backup-agent]
+  2: [acme-agency, client-alpha, client-beta, client-gamma]
+
+# Agent types for prompt template selection
+agent_types:
+  orchestrator: [bigboss]
+  system: [dashboard, task-bot]
+  # "client", "agency", "personal" are auto-inferred from hierarchy
+
+# AI briefing settings
+briefing:
+  model: opus           # LLM model for briefing generation
+  timeout: 300          # seconds
+  raw_budget: 50000     # max chars of raw context fed to LLM
+  output_budget: 8000   # target briefing size
+  cache_max_age: 86400  # 24 hours
+
+# Optional: custom prompt templates directory
+# Place .md files named by agent type: client.md, agency.md, etc.
+# templates_dir: ~/.claude/memory/templates
+
+# Optional: Obsidian vault integration
+# vault:
+#   dir: /path/to/obsidian/vault
+#   task_header: "## Tasks"
+#   auto_commit: true

@@ -29,6 +29,8 @@ dev = ["pytest>=8.0", "pytest-cov"]
 
 [project.scripts]
 claude-memory = "claude_memory.cli:main"
+claude-memory-session-start = "claude_memory.hooks:main_session_start"
+claude-memory-post-tool-use = "claude_memory.hooks:main_post_tool_use"
 
 [project.urls]
 Homepage = "https://github.com/mnardit/claude-memory"

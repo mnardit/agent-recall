@@ -120,11 +120,13 @@ def post_tool_use_hook() -> None:
 
     # Auto-commit if enabled
     if config.vault_auto_commit:
+        import shlex
         import subprocess
         vault_dir = config.vault_dir
         subprocess.Popen(
             ["bash", "-c",
-             f"cd {vault_dir} && git add people/ clients/ decisions/ && "
+             f"cd {shlex.quote(str(vault_dir))} && "
+             "git add people/ clients/ decisions/ && "
              "git diff --cached --quiet || "
              "git commit -m 'auto: regenerate from frames.db' && git push"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,

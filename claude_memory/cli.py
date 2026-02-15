@@ -37,8 +37,8 @@ def init(ctx, db):
     """Initialize memory database and config."""
     config = ctx.obj["config"]
     db_path = Path(db) if db else config.db_path
-    store = MemoryStore(db_path)
-    store.close()
+    with MemoryStore(db_path):
+        pass
     click.echo(f"Database initialized: {db_path}")
 
 
@@ -53,13 +53,10 @@ def init(ctx, db):
 @click.pass_context
 def set_slot(ctx, entity, entity_type, key, value, scope):
     """Set a slot value on an entity."""
-    store = _store(ctx.obj["config"])
-    try:
+    with _store(ctx.obj["config"]) as store:
         eid = store.resolve_entity(entity, entity_type)
         store.set_slot(eid, key, value, scope=scope)
         click.echo(f"{entity}.{key} = {value}")
-    finally:
-        store.close()
 
 
 # --- get ---
@@ -70,8 +67,7 @@ def set_slot(ctx, entity, entity_type, key, value, scope):
 @click.pass_context
 def get_slot(ctx, entity, key):
     """Get a slot value from an entity."""
-    store = _store(ctx.obj["config"])
-    try:
+    with _store(ctx.obj["config"]) as store:
         eid = store.find_entity(entity)
         if eid is None:
             click.echo("Entity not found", err=True)
@@ -80,8 +76,6 @@ def get_slot(ctx, entity, key):
         if val is None:
             sys.exit(1)
         click.echo(val)
-    finally:
-        store.close()
 
 
 # --- entity ---
@@ -92,8 +86,7 @@ def get_slot(ctx, entity, key):
 @click.pass_context
 def entity(ctx, name, as_json):
     """Show entity details."""
-    store = _store(ctx.obj["config"])
-    try:
+    with _store(ctx.obj["config"]) as store:
         eid = store.find_entity(name)
         if eid is None:
             click.echo("Not found", err=True)
@@ -108,8 +101,6 @@ def entity(ctx, name, as_json):
             click.echo(f"{e['name']} ({e['type']})")
             for k, v in slots.items():
                 click.echo(f"  {k}: {v}")
-    finally:
-        store.close()
 
 
 # --- list ---
@@ -120,16 +111,13 @@ def entity(ctx, name, as_json):
 @click.pass_context
 def list_entities(ctx, entity_type, as_json):
     """List entities in the knowledge graph."""
-    store = _store(ctx.obj["config"])
-    try:
+    with _store(ctx.obj["config"]) as store:
         entities = store.list_entities(entity_type=entity_type)
         if as_json:
             click.echo(json.dumps(entities, ensure_ascii=False, indent=2))
         else:
             for e in entities:
                 click.echo(f"  {e['name']} ({e['type']})")
-    finally:
-        store.close()
 
 
 # --- search ---
@@ -139,13 +127,10 @@ def list_entities(ctx, entity_type, as_json):
 @click.pass_context
 def search(ctx, query):
     """Search entities by name, slot, or observation."""
-    store = _store(ctx.obj["config"])
-    try:
+    with _store(ctx.obj["config"]) as store:
         results = store.search(query)
         for r in results:
             click.echo(f"  {r['name']} ({r['type']})")
-    finally:
-        store.close()
 
 
 # --- history ---
@@ -157,8 +142,7 @@ def search(ctx, query):
 @click.pass_context
 def history(ctx, entity, key, as_json):
     """Show bitemporal history for an entity slot."""
-    store = _store(ctx.obj["config"])
-    try:
+    with _store(ctx.obj["config"]) as store:
         eid = store.find_entity(entity)
         if eid is None:
             click.echo("Entity not found", err=True)
@@ -171,8 +155,6 @@ def history(ctx, entity, key, as_json):
                 status = ("current" if entry["valid_to"] is None
                           else f"-> {entry['valid_to']}")
                 click.echo(f"  {entry['valid_from']} | {entry['value']} | {status}")
-    finally:
-        store.close()
 
 
 # --- log ---
@@ -184,15 +166,12 @@ def history(ctx, entity, key, as_json):
 @click.pass_context
 def add_log(ctx, entity, text, date):
     """Add a log entry to an entity."""
-    store = _store(ctx.obj["config"])
-    try:
+    with _store(ctx.obj["config"]) as store:
         eid = store.find_entity(entity)
         if eid is None:
             eid = store.resolve_entity(entity, "entity")
         store.add_log(eid, text, date=date)
         click.echo("OK")
-    finally:
-        store.close()
 
 
 # --- logs ---
@@ -204,8 +183,7 @@ def add_log(ctx, entity, text, date):
 @click.pass_context
 def show_logs(ctx, entity, limit, as_json):
     """Show log entries for an entity."""
-    store = _store(ctx.obj["config"])
-    try:
+    with _store(ctx.obj["config"]) as store:
         eid = store.find_entity(entity)
         if eid is None:
             click.echo("Entity not found", err=True)
@@ -216,8 +194,6 @@ def show_logs(ctx, entity, limit, as_json):
         else:
             for log in logs:
                 click.echo(f"  [{log['date']}] {log['text']}")
-    finally:
-        store.close()
 
 
 # --- generate ---
@@ -259,8 +235,7 @@ def refresh(ctx, force):
 def status(ctx):
     """Show memory database status."""
     config = ctx.obj["config"]
-    store = _store(config)
-    try:
+    with _store(config) as store:
         entities = store.list_entities()
         by_type: dict[str, int] = {}
         for e in entities:
@@ -269,5 +244,3 @@ def status(ctx):
         click.echo(f"Entities: {len(entities)}")
         for t, count in sorted(by_type.items()):
             click.echo(f"  {t}: {count}")
-    finally:
-        store.close()

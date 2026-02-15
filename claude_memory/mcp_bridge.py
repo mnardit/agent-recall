@@ -127,16 +127,27 @@ class MCPBridge:
 
     def delete_relations(self, relations: list[dict]) -> dict:
         deleted = 0
+        blocked: list[str] = []
         for r in relations:
             from_id = self._store.find_entity(r["from"])
             to_id = self._store.find_entity(r["to"])
             if from_id is None or to_id is None:
                 continue
+            if self._enforce:
+                from_ok = self._entity_writable(from_id)[0]
+                to_ok = self._entity_writable(to_id)[0]
+                if not from_ok and not to_ok:
+                    blocked.append(
+                        f"SCOPE VIOLATION: Cannot delete relation "
+                        f"'{r['from']}' -> '{r['to']}' — neither entity "
+                        f"is in your scope tree."
+                    )
+                    continue
             for rel in self._store.get_relations(from_id):
                 if rel["to_id"] == to_id and rel["type"] == r["relationType"]:
                     self._store.archive_relation(rel["id"])
                     deleted += 1
-        return {"deleted": deleted, "blocked": []}
+        return {"deleted": deleted, "blocked": blocked}
 
     def delete_observations(self, deletions: list[dict]) -> dict:
         deleted = 0

@@ -425,6 +425,7 @@ def generate_briefing(
     config: MemoryConfig | None = None,
     force: bool = False,
     llm_caller: LLMCaller | None = None,
+    store: MemoryStore | None = None,
 ) -> Path | None:
     """Generate AI briefing for one agent. Returns cache path or None.
 
@@ -434,6 +435,7 @@ def generate_briefing(
         force: Regenerate even if cache is fresh.
         llm_caller: Custom LLM invocation function. Signature: (prompt, model, timeout) -> str|None.
                     Defaults to calling `claude -p` CLI.
+        store: Optional shared MemoryStore. If provided, caller is responsible for closing it.
     """
     config = config or load_config()
     cache_dir = config.cache_dir
@@ -455,7 +457,9 @@ def generate_briefing(
         log.info("Tier 0 agent %s, skipping", slug)
         return None
 
-    store = MemoryStore(config.db_path)
+    own_store = store is None
+    if own_store:
+        store = MemoryStore(config.db_path)
     try:
         agent_type = config.get_agent_type(slug)
         # Check if it's a topic entity in the DB
@@ -474,7 +478,8 @@ def generate_briefing(
                 task_header=config.vault_task_header,
             )
     finally:
-        store.close()
+        if own_store:
+            store.close()
 
     if not raw or len(raw.strip()) < 50:
         log.info("No meaningful raw context for %s (%d chars)", slug, len(raw or ""))
@@ -512,21 +517,22 @@ def generate_all(
     slugs = agent_slugs or config.all_agents()
     results: dict[str, str] = {}
 
-    for slug in sorted(slugs):
-        agent = config.get_agent(slug)
-        if agent.tier == 0:
-            results[slug] = "skip:tier0"
-            continue
+    with MemoryStore(config.db_path) as store:
+        for slug in sorted(slugs):
+            agent = config.get_agent(slug)
+            if agent.tier == 0:
+                results[slug] = "skip:tier0"
+                continue
 
-        try:
-            path_result = generate_briefing(slug, config=config, force=force,
-                                            llm_caller=llm_caller)
-            if path_result:
-                results[slug] = "ok"
-            else:
-                results[slug] = "skip:no_context"
-        except Exception as e:
-            log.error("Failed to generate for %s: %s", slug, e)
-            results[slug] = f"error:{e}"
+            try:
+                path_result = generate_briefing(slug, config=config, force=force,
+                                                llm_caller=llm_caller, store=store)
+                if path_result:
+                    results[slug] = "ok"
+                else:
+                    results[slug] = "skip:no_context"
+            except Exception as e:
+                log.error("Failed to generate for %s: %s", slug, e)
+                results[slug] = f"error:{e}"
 
     return results

@@ -283,3 +283,33 @@ def test_parent_scope_allows_child_access(tmp_path):
     ])
     assert result["added"] == 1
     b_parent.close()
+
+
+def test_scoped_delete_relations_blocked(tmp_path):
+    """Agent can't delete relation between entities outside its scope."""
+    config = MemoryConfig(
+        db_path=tmp_path / "test.db",
+        hierarchy={"acme": ["proj-a", "proj-b"]},
+    )
+    # proj-b creates two entities and a relation
+    b_b = MCPBridge(tmp_path / "test.db", default_scope="proj-b",
+                    scope_chain=["global", "acme", "proj-b"], config=config)
+    b_b.create_entities([
+        {"name": "Alice", "entityType": "person", "observations": ["works at B"]},
+        {"name": "ProjB", "entityType": "project", "observations": ["B project"]},
+    ])
+    b_b.create_relations([
+        {"from": "Alice", "to": "ProjB", "relationType": "works_on"},
+    ])
+    b_b.close()
+
+    # proj-a tries to delete that relation — blocked
+    b_a = MCPBridge(tmp_path / "test.db", default_scope="proj-a",
+                    scope_chain=["global", "acme", "proj-a"], config=config)
+    result = b_a.delete_relations([
+        {"from": "Alice", "to": "ProjB", "relationType": "works_on"},
+    ])
+    assert result["deleted"] == 0
+    assert len(result["blocked"]) == 1
+    assert "SCOPE VIOLATION" in result["blocked"][0]
+    b_a.close()

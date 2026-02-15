@@ -152,9 +152,11 @@ def test_load_config_missing_file():
         load_config("/nonexistent/path.yaml")
 
 
-def test_load_config_defaults():
+def test_load_config_defaults(tmp_path, monkeypatch):
     """No config file found — returns defaults."""
-    config = load_config.__wrapped__(None) if hasattr(load_config, '__wrapped__') else MemoryConfig()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    config = load_config()
     assert config.hierarchy == {}
     assert config.tiers == {}
 

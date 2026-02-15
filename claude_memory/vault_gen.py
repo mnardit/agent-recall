@@ -56,9 +56,11 @@ def trigger_vault_regen(store: MemoryStore | None = None,
             store.close()
 
     if auto_commit:
+        import shlex
         subprocess.Popen(
             ["bash", "-c",
-             f"cd {vault_dir} && git add people/ clients/ decisions/ && "
+             f"cd {shlex.quote(str(vault_dir))} && "
+             "git add people/ clients/ decisions/ && "
              "git diff --cached --quiet || "
              "git commit -m 'auto: regenerate from frames.db' && git push"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,

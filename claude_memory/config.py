@@ -98,7 +98,8 @@ class MemoryConfig:
 
 def _expand_path(raw: str) -> Path:
     """Expand ~ and env vars in path strings."""
-    return Path(raw).expanduser()
+    import os
+    return Path(os.path.expandvars(raw)).expanduser()
 
 
 def load_config(path: Path | str | None = None) -> MemoryConfig:
@@ -109,7 +110,12 @@ def load_config(path: Path | str | None = None) -> MemoryConfig:
             raise FileNotFoundError(f"Config file not found: {config_path}")
         return _parse_config(config_path)
 
-    for candidate in DEFAULT_CONFIG_PATHS:
+    # Compute fresh each time so tests can monkeypatch cwd/HOME
+    candidates = [
+        Path.cwd() / "memory.yaml",
+        Path.home() / ".claude" / "memory" / "memory.yaml",
+    ]
+    for candidate in candidates:
         if candidate.exists():
             return _parse_config(candidate)
 

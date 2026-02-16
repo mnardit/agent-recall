@@ -161,6 +161,14 @@ def test_load_config_defaults(tmp_path, monkeypatch):
     assert config.tiers == {}
 
 
+def test_load_config_malformed_yaml(tmp_path):
+    """Malformed YAML raises ValueError with file path."""
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("key: [unclosed\n  broken: yaml")
+    with pytest.raises(ValueError, match="Invalid YAML"):
+        load_config(bad)
+
+
 def test_load_extra_context(tmp_path):
     """extra_context loaded as per-agent dict."""
     (tmp_path / "memory.yaml").write_text("""\

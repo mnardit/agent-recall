@@ -169,7 +169,10 @@ def load_config(path: Path | str | None = None) -> MemoryConfig:
 
 def _parse_config(config_path: Path) -> MemoryConfig:
     """Parse a YAML config file into MemoryConfig."""
-    data = yaml.safe_load(config_path.read_text()) or {}
+    try:
+        data = yaml.safe_load(config_path.read_text()) or {}
+    except yaml.YAMLError as e:
+        raise ValueError(f"Invalid YAML in {config_path}: {e}") from e
 
     hierarchy: dict[str, list[str]] = {}
     for parent, children in data.get("hierarchy", {}).items():

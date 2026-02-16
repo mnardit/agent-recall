@@ -26,6 +26,24 @@ def assemble_context(store: MemoryStore, chain: list[str], tier: int,
                      budget: int = 10000,
                      vault_projects_dir: Path | None = None,
                      task_header: str = "## Tasks") -> str:
+    """Build raw context string from frames.db for an agent.
+
+    Assembles people, tasks, topics, clients, and logs into a prioritized
+    markdown document. Higher-priority sections get budget first; lower-priority
+    sections are truncated or omitted if budget is exhausted.
+
+    Args:
+        store: Open MemoryStore instance.
+        chain: Agent's scope chain (e.g. ["global", "acme", "proj-a"]).
+        tier: Agent tier (0=silent, 1=basic, 2=full context).
+        budget: Maximum output length in characters (default 10000).
+        vault_projects_dir: Optional path to Obsidian vault projects/ directory
+            for loading task lists from markdown files.
+        task_header: Markdown header that marks the tasks section in vault files.
+
+    Returns:
+        Formatted markdown context string, or empty string for tier 0.
+    """
     if tier == 0 or not chain:
         return ""
 

@@ -721,6 +721,12 @@ def test_get_agent_status_no_cache_iso(config):
     assert status["generated_at_iso"] is None
 
 
+def test_get_agent_status_empty_slug(config):
+    """Empty slug raises ValueError."""
+    with pytest.raises(ValueError, match="slug cannot be empty"):
+        get_agent_status("", config)
+
+
 def test_get_all_statuses(tmp_path, config):
     """Batch status for all agents."""
     _seed_enough_data(config)

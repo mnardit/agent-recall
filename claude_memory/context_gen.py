@@ -281,9 +281,19 @@ def clear_stale_marker(slug: str, cache_dir: Path | None = None) -> None:
 def get_agent_status(slug: str, config: MemoryConfig | None = None) -> dict:
     """Get cache/briefing status for an agent.
 
-    Returns dict with: slug, has_cache, is_fresh, is_stale, enabled, model,
-    template_type, size_bytes, generated_at, generated_at_iso, age_seconds.
+    Args:
+        slug: Agent identifier. Must be non-empty.
+        config: Memory configuration. Loaded from default paths if None.
+
+    Returns:
+        Dict with keys: slug, has_cache, is_fresh, is_stale, enabled, model,
+        template_type, size_bytes, generated_at, generated_at_iso, age_seconds.
+
+    Raises:
+        ValueError: If slug is empty.
     """
+    if not slug or not slug.strip():
+        raise ValueError("Agent slug cannot be empty")
     from datetime import datetime, timezone
 
     config = config or load_config()
@@ -321,7 +331,14 @@ def get_agent_status(slug: str, config: MemoryConfig | None = None) -> dict:
 
 
 def get_all_statuses(config: MemoryConfig | None = None) -> dict[str, dict]:
-    """Get cache status for all known agents. Returns {slug: status_dict}."""
+    """Get cache status for all known agents in one call.
+
+    Args:
+        config: Memory configuration. Loaded from default paths if None.
+
+    Returns:
+        Dict mapping agent slug to status dict (same format as ``get_agent_status``).
+    """
     config = config or load_config()
     return {slug: get_agent_status(slug, config) for slug in config.all_agents()}
 
@@ -343,7 +360,20 @@ def _save_generation_log(slug: str, entry: dict, cache_dir: Path,
 
 
 def get_generation_logs(slug: str, config: MemoryConfig | None = None) -> list[dict]:
-    """Read generation log entries for an agent."""
+    """Read generation log entries for an agent.
+
+    Logs are created by ``generate_briefing`` and stored in ``<cache_dir>/<slug>.log.json``.
+    Only the last 10 entries are kept (rotation).
+
+    Args:
+        slug: Agent identifier.
+        config: Memory configuration. Loaded from default paths if None.
+
+    Returns:
+        List of log entry dicts with keys: slug, timestamp, model, agent_type,
+        duration_ms, input_chars, output_chars, input_tokens, output_tokens, status.
+        Empty list if no logs exist.
+    """
     config = config or load_config()
     log_path = config.cache_dir / f"{slug}.log.json"
     if not log_path.exists():

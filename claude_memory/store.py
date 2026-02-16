@@ -10,6 +10,24 @@ from pathlib import Path
 
 
 class MemoryStore:
+    """SQLite-backed memory store for AI agents.
+
+    Provides entity management with scoped slots (bitemporal), observations,
+    relations, log entries, and full-text search. Supports context manager
+    protocol (``with MemoryStore(path) as store: ...``).
+
+    Args:
+        db_path: Path to SQLite database file. Created if it doesn't exist.
+        timeout: SQLite busy timeout in seconds (default 10).
+
+    Example::
+
+        with MemoryStore("memory.db") as store:
+            eid = store.resolve_entity("Alice", "person")
+            store.set_slot(eid, "role", "Engineer", scope="acme")
+            store.add_observation(eid, "Prefers async communication")
+    """
+
     def __init__(self, db_path: Path | str, timeout: float = 10.0) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -108,6 +126,14 @@ class MemoryStore:
     # --- Entities ---
 
     def create_entity(self, name: str, entity_type: str) -> int:
+        """Create a new entity. Raises ValueError if name/type is empty.
+
+        Returns:
+            The integer ID of the created entity.
+
+        Raises:
+            sqlite3.IntegrityError: If an entity with this name+type already exists.
+        """
         if not name or not name.strip():
             raise ValueError("Entity name cannot be empty")
         if not entity_type or not entity_type.strip():
@@ -120,6 +146,7 @@ class MemoryStore:
         return cur.lastrowid
 
     def find_entity(self, name: str, entity_type: str | None = None) -> int | None:
+        """Find an entity by name and optional type. Returns ID or None."""
         if entity_type:
             row = self._conn.execute(
                 "SELECT id FROM entities WHERE name = ? AND type = ?",
@@ -132,6 +159,10 @@ class MemoryStore:
         return row["id"] if row else None
 
     def resolve_entity(self, name: str, entity_type: str) -> int:
+        """Find or create an entity. Returns the entity ID.
+
+        Unlike ``create_entity``, this is idempotent — safe to call repeatedly.
+        """
         if not name or not name.strip():
             raise ValueError("Entity name cannot be empty")
         with self._conn:
@@ -142,6 +173,7 @@ class MemoryStore:
         return self.find_entity(name, entity_type)
 
     def get_entity(self, entity_id: int) -> dict | None:
+        """Get entity by ID. Returns dict with id, name, type, created_at or None."""
         row = self._conn.execute(
             "SELECT id, name, type, created_at FROM entities WHERE id = ?",
             (entity_id,),
@@ -149,6 +181,7 @@ class MemoryStore:
         return dict(row) if row else None
 
     def list_entities(self, entity_type: str | None = None) -> list[dict]:
+        """List all entities, optionally filtered by type. Returns list of {id, name, type}."""
         if entity_type:
             rows = self._conn.execute(
                 "SELECT id, name, type FROM entities WHERE type = ? ORDER BY name",
@@ -201,6 +234,16 @@ class MemoryStore:
 
     def set_slot(self, entity_id: int, key: str, value: str, scope: str = "global",
                  confidence: float = 1.0, source: str = "agent") -> None:
+        """Set a key-value slot on an entity. Bitemporal — old values are archived, not deleted.
+
+        Args:
+            entity_id: Target entity.
+            key: Slot name (e.g. "role", "email").
+            value: Slot value.
+            scope: Visibility scope (default "global"). Use hierarchy scopes for isolation.
+            confidence: Confidence score 0.0-1.0 (default 1.0).
+            source: Who set this value (default "agent").
+        """
         now = self._now()
         with self._conn:
             self._conn.execute(
@@ -216,6 +259,14 @@ class MemoryStore:
 
     def get_slot(self, entity_id: int, key: str,
                  scope_chain: list[str] | None = None) -> str | None:
+        """Get a single slot value. With scope_chain, searches from local to global.
+
+        Args:
+            entity_id: Target entity.
+            key: Slot name.
+            scope_chain: Optional list of scopes to search (e.g. ["global", "acme", "proj-a"]).
+                         Searches from most specific (last) to most general (first).
+        """
         if scope_chain:
             for scope in reversed(scope_chain):
                 row = self._conn.execute(
@@ -236,6 +287,7 @@ class MemoryStore:
 
     def get_slots(self, entity_id: int,
                   scope_chain: list[str] | None = None) -> dict[str, str]:
+        """Get all current slots as {key: value}. With scope_chain, merges scopes (local wins)."""
         if scope_chain:
             merged: dict[str, str] = {}
             for scope in scope_chain:  # global first, local last (overwrites)
@@ -306,6 +358,7 @@ class MemoryStore:
 
     def add_observation(self, entity_id: int, text: str,
                         scope: str = "global") -> int:
+        """Add a free-text observation to an entity. Returns observation ID."""
         with self._conn:
             cur = self._conn.execute(
                 "INSERT INTO observations (entity_id, text, scope, created_at) "
@@ -316,6 +369,7 @@ class MemoryStore:
 
     def get_observations(self, entity_id: int,
                          include_archived: bool = False) -> list[dict]:
+        """Get observations for an entity. Returns list of {id, text, scope, created_at}."""
         if include_archived:
             rows = self._conn.execute(
                 "SELECT id, text, scope, created_at, archived_at FROM observations "
@@ -348,6 +402,7 @@ class MemoryStore:
 
     def add_relation(self, from_id: int, to_id: int, rel_type: str,
                      scope: str = "global", context: str | None = None) -> int:
+        """Create a directed relation between two entities. Returns relation ID."""
         with self._conn:
             cur = self._conn.execute(
                 "INSERT INTO relations (from_id, to_id, type, scope, context, created_at) "
@@ -486,6 +541,11 @@ class MemoryStore:
         return query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
     def search(self, query: str, limit: int = 100) -> list[dict]:
+        """Full-text search across entity names, slot values, and observations.
+
+        Splits query into words and searches with fuzzy stem matching for long words.
+        Returns list of {id, name, type} dicts.
+        """
         found: dict[int, dict] = {}
         # Split into words, search each; for long words also try stem
         words = query.split()
@@ -530,4 +590,5 @@ class MemoryStore:
         self.close()
 
     def close(self) -> None:
+        """Close the database connection."""
         self._conn.close()

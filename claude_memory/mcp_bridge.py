@@ -11,6 +11,28 @@ from claude_memory.store import MemoryStore
 
 
 class MCPBridge:
+    """Bridge between MCP memory protocol and the SQLite store.
+
+    Translates MCP tool calls (create_entities, add_observations, etc.) into
+    MemoryStore operations. Enforces scope isolation: agents can only write to
+    entities within their scope tree.
+
+    Args:
+        db_path: Path to SQLite database.
+        default_scope: Scope for new observations/slots (e.g. "acme").
+        scope_chain: Agent's scope chain (e.g. ["global", "acme", "proj-a"]).
+            Used for scope enforcement — agents with chain length > 1 can only
+            write to entities in their allowed scopes.
+        config: Optional MemoryConfig for hierarchy lookups.
+
+    Example::
+
+        bridge = MCPBridge("memory.db", default_scope="acme",
+                           scope_chain=["global", "acme"])
+        bridge.create_entities([{"name": "Alice", "entityType": "person",
+                                 "observations": ["New team member"]}])
+    """
+
     def __init__(self, db_path: Path | str, default_scope: str = "global",
                  scope_chain: list[str] | None = None,
                  config: MemoryConfig | None = None) -> None:
@@ -53,6 +75,7 @@ class MCPBridge:
         )
 
     def create_entities(self, entities: list[dict]) -> dict:
+        """Create entities with optional observations. Returns {created: int, blocked: list}."""
         created = 0
         blocked: list[str] = []
         for e in entities:
@@ -71,6 +94,7 @@ class MCPBridge:
         return {"created": created, "blocked": blocked}
 
     def create_relations(self, relations: list[dict]) -> dict:
+        """Create directed relations between entities. Returns {created: int, blocked: list}."""
         created = 0
         blocked: list[str] = []
         for r in relations:
@@ -95,6 +119,7 @@ class MCPBridge:
         return {"created": created, "blocked": blocked}
 
     def add_observations(self, observations: list[dict]) -> dict:
+        """Add observations to existing entities. Returns {added: int, blocked: list}."""
         added = 0
         blocked: list[str] = []
         for item in observations:
@@ -111,6 +136,7 @@ class MCPBridge:
         return {"added": added, "blocked": blocked}
 
     def delete_entities(self, names: list[str]) -> dict:
+        """Delete entities by name. Returns {deleted: int, blocked: list}."""
         deleted = 0
         blocked: list[str] = []
         for name in names:
@@ -126,6 +152,7 @@ class MCPBridge:
         return {"deleted": deleted, "blocked": blocked}
 
     def delete_relations(self, relations: list[dict]) -> dict:
+        """Archive relations between entities. Returns {deleted: int, blocked: list}."""
         deleted = 0
         blocked: list[str] = []
         for r in relations:
@@ -150,6 +177,7 @@ class MCPBridge:
         return {"deleted": deleted, "blocked": blocked}
 
     def delete_observations(self, deletions: list[dict]) -> dict:
+        """Archive observations by text match. Returns {deleted: int, blocked: list}."""
         deleted = 0
         blocked: list[str] = []
         for item in deletions:
@@ -166,6 +194,7 @@ class MCPBridge:
         return {"deleted": deleted, "blocked": blocked}
 
     def open_nodes(self, names: list[str]) -> list[dict]:
+        """Get detailed info for entities by name. Returns list of {name, entityType, observations}."""
         results = []
         for name in names:
             entity_id = self._store.find_entity(name)
@@ -181,6 +210,7 @@ class MCPBridge:
         return results
 
     def search_nodes(self, query: str) -> list[dict]:
+        """Search entities by name, slot values, or observation text."""
         found = self._store.search(query)
         results = []
         for f in found:
@@ -193,6 +223,7 @@ class MCPBridge:
         return results
 
     def read_graph(self) -> dict:
+        """Read entire knowledge graph. Returns {entities: [...], relations: [...]}."""
         entities = []
         all_relations = []
         for e in self._store.list_entities():
@@ -211,4 +242,5 @@ class MCPBridge:
         return {"entities": entities, "relations": all_relations}
 
     def close(self) -> None:
+        """Close the underlying database connection."""
         self._store.close()

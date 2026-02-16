@@ -161,6 +161,26 @@ def test_load_config_defaults(tmp_path, monkeypatch):
     assert config.tiers == {}
 
 
+def test_load_extra_context(tmp_path):
+    """extra_context loaded as per-agent dict."""
+    (tmp_path / "memory.yaml").write_text("""\
+extra_context:
+  dashboard: |
+    Web dashboard for agent monitoring.
+    Service: dashboard.service
+  sync-bot: "Data sync utility"
+""")
+    config = load_config(tmp_path / "memory.yaml")
+    assert "Web dashboard" in config.extra_context["dashboard"]
+    assert config.extra_context["sync-bot"] == "Data sync utility"
+    assert "nonexistent" not in config.extra_context
+
+
+def test_extra_context_default_empty(config):
+    """extra_context defaults to empty dict when not in config."""
+    assert config.extra_context == {}
+
+
 def test_hierarchy_shorthand(tmp_path):
     """Hierarchy can be specified as parent: [children] shorthand."""
     (tmp_path / "memory.yaml").write_text("""\

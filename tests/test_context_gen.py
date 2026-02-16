@@ -325,6 +325,56 @@ def test_generate_briefing_topic(tmp_path, config):
     assert result is not None
 
 
+def test_generate_briefing_extra_context(tmp_path):
+    """extra_context from config is appended to raw, enabling briefings for sparse agents."""
+    config = MemoryConfig(
+        db_path=tmp_path / "test.db",
+        cache_dir=tmp_path / "cache",
+        agent_types={"system": ["dashboard"]},
+        extra_context={
+            "dashboard": "Web dashboard for monitoring agent statuses and task lists.",
+        },
+        briefing={"model": "haiku", "timeout": 30},
+    )
+    # Seed minimal data — just enough with extra_context to pass 50-char threshold
+    store = MemoryStore(config.db_path)
+    eid = store.resolve_entity("Alice", "person")
+    store.set_slot(eid, "role", "Admin", scope="dashboard")
+    store.close()
+
+    captured_prompt = {}
+    def capturing_llm(prompt, model, timeout):
+        captured_prompt["prompt"] = prompt
+        return "## Briefing\nGenerated."
+
+    result = generate_briefing("dashboard", config=config, force=True,
+                               llm_caller=capturing_llm)
+    assert result is not None
+    assert "Additional Context" in captured_prompt["prompt"]
+    assert "Web dashboard" in captured_prompt["prompt"]
+
+
+def test_generate_briefing_extra_context_saves_sparse_agent(tmp_path):
+    """Agent with no frames.db data but with extra_context still gets a briefing."""
+    config = MemoryConfig(
+        db_path=tmp_path / "test.db",
+        cache_dir=tmp_path / "cache",
+        tiers={1: ["my-service"]},
+        extra_context={
+            "my-service": "Background service that processes incoming webhooks. "
+                          "Monitors: POST /webhooks endpoint. Retries failed deliveries.",
+        },
+        briefing={"model": "haiku", "timeout": 30},
+    )
+    # Empty DB — no entities at all
+    store = MemoryStore(config.db_path)
+    store.close()
+
+    result = generate_briefing("my-service", config=config, force=True,
+                               llm_caller=_fake_llm)
+    assert result is not None  # Would be None without extra_context
+
+
 # --- generate_all ---
 
 def test_generate_all_basic(tmp_path, config):

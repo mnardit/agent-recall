@@ -29,6 +29,7 @@ class MemoryConfig:
     tiers: dict[int, list[str]] = field(default_factory=dict)
     agent_types: dict[str, list[str]] = field(default_factory=dict)
     briefing: dict[str, Any] = field(default_factory=dict)
+    extra_context: dict[str, str] = field(default_factory=dict)
     templates_dir: Path | None = None
     vault_dir: Path | None = None
     vault_task_header: str = "## Tasks"
@@ -145,6 +146,11 @@ def _parse_config(config_path: Path) -> MemoryConfig:
 
     briefing = data.get("briefing", {})
 
+    extra_context: dict[str, str] = {}
+    for slug, text in data.get("extra_context", {}).items():
+        if isinstance(text, str):
+            extra_context[slug] = text
+
     templates_dir = None
     if "templates_dir" in data:
         templates_dir = _expand_path(data["templates_dir"])
@@ -168,6 +174,7 @@ def _parse_config(config_path: Path) -> MemoryConfig:
         tiers=tiers,
         agent_types=agent_types,
         briefing=briefing,
+        extra_context=extra_context,
         templates_dir=templates_dir,
         vault_dir=vault_dir,
         vault_task_header=vault_task_header,

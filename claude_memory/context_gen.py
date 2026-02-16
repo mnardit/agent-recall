@@ -481,6 +481,11 @@ def generate_briefing(
         if own_store:
             store.close()
 
+    # Append per-agent extra context from config
+    extra = config.extra_context.get(slug)
+    if extra:
+        raw = (raw or "") + f"\n\n## Additional Context\n{extra}"
+
     if not raw or len(raw.strip()) < 50:
         log.info("No meaningful raw context for %s (%d chars)", slug, len(raw or ""))
         return None

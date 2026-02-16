@@ -31,6 +31,12 @@ For MCP server support:
 pip install 'agent-memory[mcp]'
 ```
 
+For development (tests + optional tools):
+
+```bash
+pip install -e '.[dev]'
+```
+
 ## Quick Start
 
 ### 1. Initialize
@@ -153,6 +159,16 @@ agent-memory refresh --force
 | `status` | Show database stats |
 
 All commands accept `--db` and `--config` overrides.
+
+## Testing
+
+Recommended local command:
+
+```bash
+PYTHONPATH=. pytest -q
+```
+
+If you installed in editable mode (`pip install -e '.[dev]'`), plain `pytest -q` also works.
 
 ## Python API
 

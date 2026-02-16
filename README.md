@@ -292,7 +292,9 @@ When one agent saves new facts, caches for affected agents are marked stale. Nex
 
 ## Configuration
 
-For a single agent with defaults, no config file is needed. For multiple agents or custom settings, create `memory.yaml` in your project root or `~/.agent-recall/memory.yaml`:
+For a single agent with defaults, no config file is needed. By default, agent-recall auto-discovers project files (`CLAUDE.md`, `README.md`, `.cursorrules`, `.windsurfrules`) in the current directory and includes them in the data sent to the LLM for briefing generation. This means new agents get useful briefings from day one, even with an empty database. Disable with `auto_discover: false` in the briefing config.
+
+For multiple agents or custom settings, create `memory.yaml` in your project root or `~/.agent-recall/memory.yaml`:
 
 ```yaml
 # Database location (default: ~/.agent-recall/frames.db)
@@ -338,7 +340,7 @@ agents:
 | `template` | string | Builtin type name or inline text |
 | `enabled` | bool | Disable briefing generation (default: true) |
 | `context_files` | list | Extra files to include in context |
-| `context_budget` | int | Max chars for context files (default: 3000) |
+| `context_budget` | int | Max chars for context files (default: 8000) |
 | `extra_context` | string | Static text appended to raw context |
 | `adaptive` | bool | Per-agent adaptive cache override |
 | `min_cache_age` | int | Min seconds between regenerations |
@@ -449,7 +451,7 @@ pip install -e ".[dev]"
 pytest
 ```
 
-257 tests covering store, config, hierarchy, context assembly, AI briefings, vault generation, hooks, dedup, and MCP bridge.
+268 tests covering store, config, hierarchy, context assembly, AI briefings, vault generation, hooks, dedup, and MCP bridge.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 

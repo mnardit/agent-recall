@@ -297,7 +297,7 @@ agents:
     assert files[0] == Path("/tmp/file1.md")
     assert config.get_agent_context_budget("dashboard") == 5000
     # Default budget for unknown agent
-    assert config.get_agent_context_budget("unknown") == 3000
+    assert config.get_agent_context_budget("unknown") == 8000
     # No context_files for unknown agent
     assert config.get_agent_context_files("unknown") == []
 

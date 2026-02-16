@@ -110,9 +110,9 @@ class MemoryConfig:
         return [_expand_path(p) for p in paths]
 
     def get_agent_context_budget(self, slug: str) -> int:
-        """Get context_budget for file loading. Default: 3000 chars."""
+        """Get context_budget for file loading. Default: 8000 chars."""
         agent_cfg = self.agents_config.get(slug, {})
-        return agent_cfg.get("context_budget", 3000)
+        return agent_cfg.get("context_budget", 8000)
 
     def get_agent_enabled(self, slug: str) -> bool:
         """Check if agent briefing generation is enabled. Default: True."""

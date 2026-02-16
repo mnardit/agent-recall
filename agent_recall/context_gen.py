@@ -32,6 +32,31 @@ LLMCaller = Callable[[str, str, int], "str | None | LLMResult"]
 
 MAX_LOG_ENTRIES = 10
 
+# Common project instruction files across editors, in discovery order.
+DISCOVERABLE_FILES = [
+    "CLAUDE.md",              # Claude Code
+    ".claude/CLAUDE.md",      # Claude Code (nested)
+    ".cursorrules",           # Cursor
+    ".cursor/rules",          # Cursor (nested)
+    ".windsurfrules",         # Windsurf
+    "README.md",              # Universal
+]
+
+
+def _discover_project_files(project_dir: Path | None = None) -> list[Path]:
+    """Auto-discover project instruction files in a directory.
+
+    Scans for common editor-specific and general project files.
+    Returns list of existing file paths, in priority order.
+    """
+    base = project_dir or Path.cwd()
+    found = []
+    for name in DISCOVERABLE_FILES:
+        path = base / name
+        if path.is_file():
+            found.append(path)
+    return found
+
 
 @dataclass
 class LLMResult:
@@ -715,6 +740,7 @@ def generate_briefing(
     force: bool = False,
     llm_caller: LLMCaller | None = None,
     store: MemoryStore | None = None,
+    project_dir: Path | None = None,
 ) -> Path | None:
     """Generate AI briefing for one agent. Returns cache path or None.
 
@@ -725,6 +751,8 @@ def generate_briefing(
         llm_caller: Custom LLM invocation function. Signature: (prompt, model, timeout) -> str|None.
                     Defaults to calling `claude -p` CLI.
         store: Optional shared MemoryStore. If provided, caller is responsible for closing it.
+        project_dir: Directory to scan for project files (CLAUDE.md, README.md, etc.).
+                     Defaults to CWD if not specified.
     """
     config = config or load_config()
 
@@ -782,13 +810,24 @@ def generate_briefing(
     if extra:
         raw = (raw or "") + f"\n\n## Additional Context\n{extra}"
 
-    # Append content from context_files
+    # Append content from context_files (explicit config + auto-discovered)
     ctx_files = config.get_agent_context_files(slug)
+
+    # Auto-discover project files from project_dir or CWD
+    if config.briefing.get("auto_discover", True):
+        discovered = _discover_project_files(project_dir)
+        # Merge: explicit config files first, then discovered (no duplicates)
+        seen = {f.resolve() for f in ctx_files}
+        for f in discovered:
+            if f.resolve() not in seen:
+                ctx_files.append(f)
+                seen.add(f.resolve())
+
     if ctx_files:
         ctx_budget = config.get_agent_context_budget(slug)
         file_content = _load_context_files(ctx_files, ctx_budget)
         if file_content:
-            raw = (raw or "") + f"\n\n## Project Context\n{file_content}"
+            raw = (raw or "") + f"\n\n## Project Files\n{file_content}"
 
     if not raw or len(raw.strip()) < 50:
         log.info("No meaningful raw context for %s (%d chars)", slug, len(raw or ""))
@@ -857,6 +896,11 @@ def generate_all(
     llm_caller: LLMCaller | None = None,
 ) -> dict[str, str]:
     """Generate briefings for multiple agents. Returns {slug: status}.
+
+    Note: This function does not accept per-agent ``project_dir``. Auto-discovery
+    will scan CWD for all agents, which is usually wrong in batch mode.
+    For batch generation with per-agent project directories, call
+    ``generate_briefing()`` in a loop with explicit ``project_dir`` per agent.
 
     Args:
         agent_slugs: List of agent slugs to process. If None, uses config.all_agents().

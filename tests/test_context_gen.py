@@ -6,11 +6,12 @@ from pathlib import Path
 from agent_recall.store import MemoryStore
 from agent_recall.config import MemoryConfig
 from agent_recall.context_gen import (
-    BUILTIN_TEMPLATES, AGENT_TYPES, load_template, build_prompt,
+    BUILTIN_TEMPLATES, AGENT_TYPES, DISCOVERABLE_FILES,
+    load_template, build_prompt,
     is_cache_fresh, get_cache_path, read_cache,
     invalidate_cache, clear_stale_marker, scope_to_agents,
     get_agent_status, get_all_statuses, get_generation_logs, LLMResult,
-    _load_context_files,
+    _load_context_files, _discover_project_files,
     _assemble_orchestrator_context, _assemble_topic_context,
     generate_briefing, generate_all,
     DEFAULT_OUTPUT_BUDGET,
@@ -437,9 +438,9 @@ def test_generate_briefing_tier0_skipped(config):
 
 
 def test_generate_briefing_no_context(tmp_path, config):
-    # Empty DB — no meaningful context
+    # Empty DB — no meaningful context (use tmp_path as project_dir to avoid CWD discovery)
     result = generate_briefing("proj-a", config=config, force=True,
-                               llm_caller=_fake_llm)
+                               llm_caller=_fake_llm, project_dir=tmp_path)
     assert result is None
 
 
@@ -883,3 +884,139 @@ def test_generate_briefing_uses_config_backend(config):
     generate_briefing("acme", config=config, force=True, llm_caller=_fake_llm)
     logs = get_generation_logs("acme", config)
     assert logs[0]["status"] == "ok"
+
+
+# --- Auto-discovery of project files ---
+
+def test_discover_project_files_claude_md(tmp_path):
+    """Discovers CLAUDE.md in a directory."""
+    (tmp_path / "CLAUDE.md").write_text("# My Agent")
+    found = _discover_project_files(tmp_path)
+    assert len(found) == 1
+    assert found[0].name == "CLAUDE.md"
+
+
+def test_discover_project_files_readme(tmp_path):
+    """Discovers README.md in a directory."""
+    (tmp_path / "README.md").write_text("# My Project")
+    found = _discover_project_files(tmp_path)
+    assert len(found) == 1
+    assert found[0].name == "README.md"
+
+
+def test_discover_project_files_multiple(tmp_path):
+    """Discovers multiple files in priority order."""
+    (tmp_path / "CLAUDE.md").write_text("# Claude instructions")
+    (tmp_path / "README.md").write_text("# Readme")
+    (tmp_path / ".cursorrules").write_text("cursor rules")
+    found = _discover_project_files(tmp_path)
+    assert len(found) == 3
+    names = [f.name for f in found]
+    assert names == ["CLAUDE.md", ".cursorrules", "README.md"]
+
+
+def test_discover_project_files_empty_dir(tmp_path):
+    """Empty directory returns empty list."""
+    found = _discover_project_files(tmp_path)
+    assert found == []
+
+
+def test_generate_briefing_auto_discovers(tmp_path, monkeypatch):
+    """Auto-discovered CLAUDE.md content reaches LLM prompt."""
+    # Create CLAUDE.md in project_dir
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    (project_dir / "CLAUDE.md").write_text("# Agent Instructions\nDo important things.")
+
+    config = MemoryConfig(
+        db_path=tmp_path / "test.db",
+        cache_dir=tmp_path / "cache",
+        tiers={1: ["my-agent"]},
+        extra_context={
+            "my-agent": "Extra context to pass 50-char threshold for briefing generation.",
+        },
+        briefing={"model": "haiku", "timeout": 30},
+    )
+    store = MemoryStore(config.db_path)
+    store.close()
+
+    captured = {}
+    def capturing_llm(prompt, model, timeout):
+        captured["prompt"] = prompt
+        return "## Briefing\nGenerated."
+
+    result = generate_briefing("my-agent", config=config, force=True,
+                               llm_caller=capturing_llm, project_dir=project_dir)
+    assert result is not None
+    assert "Do important things" in captured["prompt"]
+    assert "Project Files" in captured["prompt"]
+
+
+def test_generate_briefing_auto_discover_disabled(tmp_path):
+    """auto_discover: false prevents file discovery."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    (project_dir / "CLAUDE.md").write_text("# Should NOT appear")
+
+    config = MemoryConfig(
+        db_path=tmp_path / "test.db",
+        cache_dir=tmp_path / "cache",
+        tiers={1: ["my-agent"]},
+        extra_context={
+            "my-agent": "Extra context to pass 50-char threshold for briefing generation.",
+        },
+        briefing={"model": "haiku", "timeout": 30, "auto_discover": False},
+    )
+    store = MemoryStore(config.db_path)
+    store.close()
+
+    captured = {}
+    def capturing_llm(prompt, model, timeout):
+        captured["prompt"] = prompt
+        return "## Briefing\nGenerated."
+
+    generate_briefing("my-agent", config=config, force=True,
+                      llm_caller=capturing_llm, project_dir=project_dir)
+    assert "Should NOT appear" not in captured["prompt"]
+
+
+def test_generate_briefing_explicit_plus_discovered(tmp_path):
+    """Explicit context_files + auto-discovered, no duplicates."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    claude_md = project_dir / "CLAUDE.md"
+    claude_md.write_text("# Claude instructions here")
+    (project_dir / "README.md").write_text("# Readme content")
+
+    config = MemoryConfig(
+        db_path=tmp_path / "test.db",
+        cache_dir=tmp_path / "cache",
+        tiers={1: ["my-agent"]},
+        agents_config={
+            "my-agent": {
+                # Explicitly include CLAUDE.md — should not be duplicated
+                "context_files": [str(claude_md)],
+                "context_budget": 10000,
+            },
+        },
+        extra_context={
+            "my-agent": "Extra context to pass 50-char threshold for briefing generation.",
+        },
+        briefing={"model": "haiku", "timeout": 30},
+    )
+    store = MemoryStore(config.db_path)
+    store.close()
+
+    captured = {}
+    def capturing_llm(prompt, model, timeout):
+        captured["prompt"] = prompt
+        return "## Briefing\nGenerated."
+
+    generate_briefing("my-agent", config=config, force=True,
+                      llm_caller=capturing_llm, project_dir=project_dir)
+    prompt = captured["prompt"]
+    # Both files present
+    assert "Claude instructions here" in prompt
+    assert "Readme content" in prompt
+    # CLAUDE.md appears only once (no duplicate)
+    assert prompt.count("Claude instructions here") == 1

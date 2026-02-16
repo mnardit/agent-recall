@@ -13,7 +13,7 @@ from claude_memory.config import load_config
 from claude_memory.context import assemble_context
 from claude_memory.context_gen import (
     read_cache, get_cache_path, generate_briefing,
-    clear_stale_marker,
+    clear_stale_marker, invalidate_cache, scope_to_agents,
 )
 from claude_memory.store import MemoryStore
 from claude_memory.vault_gen import generate_vault
@@ -169,17 +169,14 @@ def main_post_tool_use():
     post_tool_use_hook()
 
 
-def _invalidate_affected_agents(data: dict, config) -> None:
+def _invalidate_affected_agents(data: dict, config: "MemoryConfig") -> None:
     """Determine affected scopes from MCP tool input and invalidate their caches."""
-    from claude_memory.context_gen import invalidate_cache, scope_to_agents
-
-    # Extract scopes from tool_input — depends on tool type
     tool_input = data.get("tool_input", {})
     if isinstance(tool_input, str):
         try:
             tool_input = json.loads(tool_input)
         except (json.JSONDecodeError, TypeError):
-            return
+            tool_input = {}
 
     scopes: set[str] = set()
 
@@ -188,6 +185,22 @@ def _invalidate_affected_agents(data: dict, config) -> None:
         scopes.add(Path.cwd().name)
     except Exception:
         pass
+
+    # Extract scopes from tool_input — MCP tools pass scope in various fields
+    if isinstance(tool_input, dict):
+        # Direct scope field (add_observations, set_slot)
+        if "scope" in tool_input:
+            scopes.add(tool_input["scope"])
+        # Entities list (create_entities) — each may have observations with scope
+        for entity in tool_input.get("entities", []):
+            if isinstance(entity, dict):
+                for obs in entity.get("observations", []):
+                    if isinstance(obs, dict) and "scope" in obs:
+                        scopes.add(obs["scope"])
+        # Observations list (add_observations)
+        for obs in tool_input.get("observations", []):
+            if isinstance(obs, dict) and "scope" in obs:
+                scopes.add(obs["scope"])
 
     # Map scopes to affected agents and invalidate
     affected: set[str] = set()

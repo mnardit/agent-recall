@@ -272,6 +272,49 @@ agents:
     assert config.get_agent_context_files("unknown") == []
 
 
+def test_get_agent_enabled_default(config):
+    """Agents are enabled by default."""
+    assert config.get_agent_enabled("client-a") is True
+
+
+def test_get_agent_enabled_false(tmp_path):
+    """Agent with enabled: false is disabled."""
+    (tmp_path / "memory.yaml").write_text("""\
+agents:
+  my-agent:
+    enabled: false
+""")
+    config = load_config(tmp_path / "memory.yaml")
+    assert config.get_agent_enabled("my-agent") is False
+
+
+def test_get_agent_template_default(config):
+    """No template override returns None (auto-detect)."""
+    assert config.get_agent_template("client-a") is None
+
+
+def test_get_agent_template_type_override(tmp_path):
+    """template as type name string."""
+    (tmp_path / "memory.yaml").write_text("""\
+agents:
+  my-agent:
+    template: personal
+""")
+    config = load_config(tmp_path / "memory.yaml")
+    assert config.get_agent_template("my-agent") == "personal"
+
+
+def test_get_agent_template_custom_text(tmp_path):
+    """template as inline text with placeholders."""
+    (tmp_path / "memory.yaml").write_text("""\
+agents:
+  my-agent:
+    template: "Custom {slug}: {raw_context} (max {budget})"
+""")
+    config = load_config(tmp_path / "memory.yaml")
+    assert "Custom {slug}" in config.get_agent_template("my-agent")
+
+
 def test_hierarchy_shorthand(tmp_path):
     """Hierarchy can be specified as parent: [children] shorthand."""
     (tmp_path / "memory.yaml").write_text("""\

@@ -9,6 +9,7 @@ from claude_memory.context_gen import (
     BUILTIN_TEMPLATES, AGENT_TYPES, load_template, build_prompt,
     is_cache_fresh, get_cache_path, read_cache,
     invalidate_cache, clear_stale_marker, scope_to_agents,
+    get_agent_status, get_generation_logs, LLMResult,
     _load_context_files,
     _assemble_orchestrator_context, _assemble_topic_context,
     generate_briefing, generate_all,
@@ -558,6 +559,83 @@ def test_generate_briefing_extra_context_saves_sparse_agent(tmp_path):
     assert result is not None  # Would be None without extra_context
 
 
+# --- template override ---
+
+def test_generate_briefing_template_override_inline(tmp_path):
+    """Per-agent inline template changes the prompt sent to LLM."""
+    config = MemoryConfig(
+        db_path=tmp_path / "test.db",
+        cache_dir=tmp_path / "cache",
+        tiers={2: ["my-agent"]},
+        agents_config={"my-agent": {"template": "Custom agent {slug}: {raw_context} (budget {budget})"}},
+        briefing={"model": "haiku", "timeout": 30},
+    )
+    _seed_enough_data(config, scope="my-agent")
+    captured = {}
+    def capturing_llm(prompt, model, timeout):
+        captured["prompt"] = prompt
+        return "## Briefing\nGenerated."
+    generate_briefing("my-agent", config=config, force=True, llm_caller=capturing_llm)
+    assert captured["prompt"].startswith("Custom agent my-agent:")
+
+
+def test_generate_briefing_template_type_override(tmp_path):
+    """Per-agent template type selects a different builtin template."""
+    config = MemoryConfig(
+        db_path=tmp_path / "test.db",
+        cache_dir=tmp_path / "cache",
+        hierarchy={"acme": ["my-agent"]},
+        tiers={2: ["acme", "my-agent"]},
+        agents_config={"my-agent": {"template": "personal"}},
+        briefing={"model": "haiku", "timeout": 30},
+    )
+    _seed_enough_data(config, scope="my-agent")
+    captured = {}
+    def capturing_llm(prompt, model, timeout):
+        captured["prompt"] = prompt
+        return "## Briefing\nGenerated."
+    generate_briefing("my-agent", config=config, force=True, llm_caller=capturing_llm)
+    # "my-agent" is hierarchy child → auto-detect = "client"
+    # But override = "personal" → should use personal template text
+    assert "Keep it brief" in captured["prompt"]
+
+
+# --- enabled/disabled ---
+
+def test_generate_briefing_disabled_agent(tmp_path):
+    """Disabled agent returns None without calling LLM."""
+    config = MemoryConfig(
+        db_path=tmp_path / "test.db",
+        cache_dir=tmp_path / "cache",
+        tiers={2: ["my-agent"]},
+        agents_config={"my-agent": {"enabled": False}},
+        briefing={"model": "haiku", "timeout": 30},
+    )
+    _seed_enough_data(config, scope="my-agent")
+    call_count = 0
+    def counting_llm(prompt, model, timeout):
+        nonlocal call_count
+        call_count += 1
+        return _fake_llm(prompt, model, timeout)
+    result = generate_briefing("my-agent", config=config, force=True, llm_caller=counting_llm)
+    assert result is None
+    assert call_count == 0
+
+
+def test_generate_all_skips_disabled(tmp_path):
+    """generate_all reports disabled agents as skip:disabled."""
+    config = MemoryConfig(
+        db_path=tmp_path / "test.db",
+        cache_dir=tmp_path / "cache",
+        tiers={2: ["agent-a", "agent-b"]},
+        agents_config={"agent-b": {"enabled": False}},
+        briefing={"model": "haiku", "timeout": 30},
+    )
+    _seed_enough_data(config, scope="agent-a")
+    results = generate_all(["agent-a", "agent-b"], config=config, force=True, llm_caller=_fake_llm)
+    assert results["agent-b"] == "skip:disabled"
+
+
 # --- generate_all ---
 
 def test_generate_all_basic(tmp_path, config):
@@ -578,3 +656,124 @@ def test_generate_all_uses_config_agents(tmp_path, config):
     # Should process all agents from config.all_agents()
     assert isinstance(results, dict)
     assert len(results) > 0
+
+
+# --- agent status API ---
+
+def test_get_agent_status_cached(tmp_path, config):
+    """Status for agent with fresh cache."""
+    _seed_enough_data(config)
+    generate_briefing("acme", config=config, force=True, llm_caller=_fake_llm)
+    status = get_agent_status("acme", config)
+    assert status["has_cache"] is True
+    assert status["is_stale"] is False
+    assert status["is_fresh"] is True
+    assert status["size_bytes"] > 0
+    assert status["generated_at"] is not None
+    assert status["age_seconds"] < 5
+    assert status["enabled"] is True
+    assert status["model"] == "haiku"
+
+
+def test_get_agent_status_no_cache(config):
+    """Status for agent with no cache."""
+    status = get_agent_status("proj-a", config)
+    assert status["has_cache"] is False
+    assert status["is_fresh"] is False
+    assert status["size_bytes"] == 0
+    assert status["generated_at"] is None
+
+
+def test_get_agent_status_stale(tmp_path, config):
+    """Status for agent with stale marker."""
+    _seed_enough_data(config)
+    generate_briefing("acme", config=config, force=True, llm_caller=_fake_llm)
+    (config.cache_dir / "acme.stale").write_text("1")
+    status = get_agent_status("acme", config)
+    assert status["has_cache"] is True
+    assert status["is_stale"] is True
+    assert status["is_fresh"] is False
+
+
+def test_get_agent_status_disabled(tmp_path):
+    """Status for disabled agent."""
+    config = MemoryConfig(
+        db_path=tmp_path / "test.db",
+        cache_dir=tmp_path / "cache",
+        agents_config={"my-agent": {"enabled": False}},
+    )
+    status = get_agent_status("my-agent", config)
+    assert status["enabled"] is False
+
+
+# --- generation logs ---
+
+def test_generation_log_created(tmp_path, config):
+    """Generating a briefing creates a log entry."""
+    _seed_enough_data(config)
+    generate_briefing("acme", config=config, force=True, llm_caller=_fake_llm)
+    logs = get_generation_logs("acme", config)
+    assert len(logs) == 1
+    entry = logs[0]
+    assert entry["slug"] == "acme"
+    assert entry["status"] == "ok"
+    assert entry["model"] == "haiku"
+    assert entry["duration_ms"] >= 0
+    assert entry["input_chars"] > 0
+    assert entry["output_chars"] > 0
+    assert "timestamp" in entry
+    assert entry["input_tokens"] is None  # str caller, no token tracking
+
+
+def test_generation_log_error(tmp_path, config):
+    """Failed generation logs an error."""
+    _seed_enough_data(config)
+    def failing_llm(prompt, model, timeout):
+        return None
+    generate_briefing("acme", config=config, force=True, llm_caller=failing_llm)
+    logs = get_generation_logs("acme", config)
+    assert len(logs) == 1
+    assert logs[0]["status"] == "error:empty_response"
+
+
+def test_generation_log_rotation(tmp_path, config):
+    """Logs rotate — only last N entries kept."""
+    _seed_enough_data(config)
+    for _ in range(15):
+        generate_briefing("acme", config=config, force=True, llm_caller=_fake_llm)
+    logs = get_generation_logs("acme", config)
+    assert len(logs) == 10
+
+
+def test_generation_logs_empty_agent(config):
+    """Agent with no logs returns empty list."""
+    logs = get_generation_logs("nonexistent", config)
+    assert logs == []
+
+
+# --- LLMResult token tracking ---
+
+def test_generation_log_with_tokens(tmp_path, config):
+    """LLMResult includes token counts in log."""
+    _seed_enough_data(config)
+    def token_llm(prompt, model, timeout):
+        return LLMResult(
+            text="## Briefing\nGenerated.",
+            input_tokens=1500,
+            output_tokens=800,
+        )
+    generate_briefing("acme", config=config, force=True, llm_caller=token_llm)
+    logs = get_generation_logs("acme", config)
+    assert logs[0]["input_tokens"] == 1500
+    assert logs[0]["output_tokens"] == 800
+    assert logs[0]["status"] == "ok"
+
+
+def test_llm_result_backward_compat(tmp_path, config):
+    """Old-style str return still works with no token data."""
+    _seed_enough_data(config)
+    generate_briefing("acme", config=config, force=True, llm_caller=_fake_llm)
+    logs = get_generation_logs("acme", config)
+    assert logs[0]["input_tokens"] is None
+    assert logs[0]["output_tokens"] is None
+    assert logs[0]["status"] == "ok"

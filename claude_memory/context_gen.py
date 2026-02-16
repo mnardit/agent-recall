@@ -3,10 +3,12 @@
 Generates cached briefings per agent. SessionStart hook reads cache first,
 falls back to raw context if cache is stale or missing.
 """
+import json as _json
 import logging
 import os
 import subprocess
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
@@ -25,8 +27,18 @@ DEFAULT_TIMEOUT = 300
 
 AGENT_TYPES = ("client", "agency", "personal", "topic", "system", "orchestrator")
 
-# Type for pluggable LLM invocation: (prompt, model, timeout) -> str | None
-LLMCaller = Callable[[str, str, int], str | None]
+# Type for pluggable LLM invocation: (prompt, model, timeout) -> str | None | LLMResult
+LLMCaller = Callable[[str, str, int], "str | None | LLMResult"]
+
+MAX_LOG_ENTRIES = 10
+
+
+@dataclass
+class LLMResult:
+    """Structured result from LLM invocation with optional token counts."""
+    text: str | None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
 
 
 # --- Built-in Prompt Templates ---
@@ -264,6 +276,66 @@ def clear_stale_marker(slug: str, cache_dir: Path | None = None) -> None:
     stale_path = cache_dir / f"{slug}.stale"
     if stale_path.exists():
         stale_path.unlink()
+
+
+def get_agent_status(slug: str, config: MemoryConfig | None = None) -> dict:
+    """Get cache/briefing status for an agent.
+
+    Returns dict with: slug, has_cache, is_fresh, is_stale, enabled, model,
+    template_type, size_bytes, generated_at, age_seconds.
+    """
+    config = config or load_config()
+    cache_dir = config.cache_dir
+    cache_path = get_cache_path(slug, cache_dir)
+    agent_briefing = config.get_agent_briefing(slug)
+    stale_path = cache_dir / f"{slug}.stale"
+
+    has_cache = cache_path.exists()
+    generated_at = cache_path.stat().st_mtime if has_cache else None
+    age = time.time() - generated_at if generated_at is not None else None
+    size = cache_path.stat().st_size if has_cache else 0
+
+    return {
+        "slug": slug,
+        "has_cache": has_cache,
+        "is_stale": stale_path.exists(),
+        "is_fresh": is_cache_fresh(slug, cache_dir,
+                                    agent_briefing.get("cache_max_age", DEFAULT_CACHE_MAX_AGE)),
+        "enabled": config.get_agent_enabled(slug),
+        "model": agent_briefing.get("model", DEFAULT_MODEL),
+        "template_type": config.get_agent_template(slug) or config.get_agent_type(slug),
+        "size_bytes": size,
+        "generated_at": generated_at,
+        "age_seconds": round(age) if age is not None else None,
+    }
+
+
+def _save_generation_log(slug: str, entry: dict, cache_dir: Path,
+                         max_entries: int = MAX_LOG_ENTRIES) -> None:
+    """Append a log entry to <cache_dir>/<slug>.log.json, rotating old entries."""
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    log_path = cache_dir / f"{slug}.log.json"
+    entries: list[dict] = []
+    if log_path.exists():
+        try:
+            entries = _json.loads(log_path.read_text())
+        except (_json.JSONDecodeError, OSError):
+            entries = []
+    entries.append(entry)
+    entries = entries[-max_entries:]
+    log_path.write_text(_json.dumps(entries, indent=2))
+
+
+def get_generation_logs(slug: str, config: MemoryConfig | None = None) -> list[dict]:
+    """Read generation log entries for an agent."""
+    config = config or load_config()
+    log_path = config.cache_dir / f"{slug}.log.json"
+    if not log_path.exists():
+        return []
+    try:
+        return _json.loads(log_path.read_text())
+    except (_json.JSONDecodeError, OSError):
+        return []
 
 
 def scope_to_agents(scope: str, config: MemoryConfig) -> list[str]:
@@ -522,6 +594,11 @@ def generate_briefing(
         store: Optional shared MemoryStore. If provided, caller is responsible for closing it.
     """
     config = config or load_config()
+
+    if not config.get_agent_enabled(slug):
+        log.info("Agent %s is disabled, skipping", slug)
+        return None
+
     cache_dir = config.cache_dir
     # Per-agent briefing settings (merged with global defaults)
     agent_briefing = config.get_agent_briefing(slug)
@@ -584,17 +661,57 @@ def generate_briefing(
         log.info("No meaningful raw context for %s (%d chars)", slug, len(raw or ""))
         return None
 
-    prompt = build_prompt(slug, agent_type, raw, output_budget, config.templates_dir)
+    # Check for per-agent template override
+    custom_template = config.get_agent_template(slug)
+    if custom_template and custom_template in BUILTIN_TEMPLATES:
+        # Type name override — use that builtin template instead of auto-detected
+        agent_type = custom_template
+        prompt = build_prompt(slug, agent_type, raw, output_budget, config.templates_dir)
+    elif custom_template:
+        # Inline custom template — format directly
+        prompt = custom_template.format(slug=slug, raw_context=raw, budget=output_budget)
+    else:
+        prompt = build_prompt(slug, agent_type, raw, output_budget, config.templates_dir)
     log.info("Generating briefing for %s (%s, %d chars raw)", slug, agent_type, len(raw))
 
-    result = caller(prompt, model, timeout)
+    start_time = time.time()
+    raw_result = caller(prompt, model, timeout)
+    duration_ms = int((time.time() - start_time) * 1000)
+
+    # Normalize — support both str|None and LLMResult
+    if isinstance(raw_result, LLMResult):
+        result = raw_result.text
+        input_tokens = raw_result.input_tokens
+        output_tokens = raw_result.output_tokens
+    else:
+        result = raw_result
+        input_tokens = None
+        output_tokens = None
+
+    log_entry = {
+        "slug": slug,
+        "timestamp": time.time(),
+        "model": model,
+        "agent_type": agent_type,
+        "duration_ms": duration_ms,
+        "input_chars": len(prompt),
+        "output_chars": len(result) if result else 0,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+    }
+
     if not result:
         log.warning("LLM returned empty for %s", slug)
+        log_entry["status"] = "error:empty_response"
+        _save_generation_log(slug, log_entry, cache_dir)
         return None
+
+    log_entry["status"] = "ok"
 
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_path.write_text(result)
     clear_stale_marker(slug, cache_dir)
+    _save_generation_log(slug, log_entry, cache_dir)
     log.info("Cached briefing for %s (%d chars)", slug, len(result))
     return cache_path
 
@@ -619,6 +736,9 @@ def generate_all(
 
     with MemoryStore(config.db_path) as store:
         for slug in sorted(slugs):
+            if not config.get_agent_enabled(slug):
+                results[slug] = "skip:disabled"
+                continue
             agent = config.get_agent(slug)
             if agent.tier == 0:
                 results[slug] = "skip:tier0"

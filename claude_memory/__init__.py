@@ -7,10 +7,20 @@ from claude_memory.hierarchy import ScopedView
 from claude_memory.config import MemoryConfig, AgentConfig, load_config
 from claude_memory.mcp_bridge import MCPBridge
 from claude_memory.context import assemble_context
+from claude_memory.context_gen import (
+    get_agent_status,
+    get_generation_logs,
+    generate_briefing,
+    generate_all,
+    LLMResult,
+)
 
 __all__ = [
     "MemoryStore", "ScopedView", "MCPBridge",
     "MemoryConfig", "AgentConfig", "load_config",
     "assemble_context",
+    "get_agent_status", "get_generation_logs",
+    "generate_briefing", "generate_all",
+    "LLMResult",
     "__version__",
 ]

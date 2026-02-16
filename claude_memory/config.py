@@ -114,6 +114,16 @@ class MemoryConfig:
         agent_cfg = self.agents_config.get(slug, {})
         return agent_cfg.get("context_budget", 3000)
 
+    def get_agent_enabled(self, slug: str) -> bool:
+        """Check if agent briefing generation is enabled. Default: True."""
+        agent_cfg = self.agents_config.get(slug, {})
+        return agent_cfg.get("enabled", True)
+
+    def get_agent_template(self, slug: str) -> str | None:
+        """Get custom template override for an agent. None means auto-detect."""
+        agent_cfg = self.agents_config.get(slug, {})
+        return agent_cfg.get("template")
+
     def scope_children(self, scope: str) -> set[str]:
         """Get children of a scope from hierarchy."""
         return set(self.hierarchy.get(scope, []))

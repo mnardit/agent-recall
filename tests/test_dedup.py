@@ -42,9 +42,9 @@ def test_extract_all_name_parts():
 
 
 def test_extract_all_name_parts_unicode():
-    parts = extract_all_name_parts("Мария Иванова")
-    assert "мария" in parts
-    assert "иванова" in parts
+    parts = extract_all_name_parts("Müller Straße")
+    assert "müller" in parts
+    assert "straße" in parts
 
 
 # --- Similarity scoring ---

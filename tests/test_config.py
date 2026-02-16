@@ -227,6 +227,28 @@ agents:
     assert d["timeout"] == 120
 
 
+def test_get_agent_briefing_merges_all_keys(tmp_path):
+    """min_cache_age and adaptive are also merged per-agent."""
+    (tmp_path / "memory.yaml").write_text("""\
+briefing:
+  model: haiku
+  adaptive: true
+  min_cache_age: 1800
+agents:
+  special:
+    adaptive: false
+    min_cache_age: 0
+""")
+    config = load_config(tmp_path / "memory.yaml")
+    b = config.get_agent_briefing("special")
+    assert b["adaptive"] is False
+    assert b["min_cache_age"] == 0
+    # Global still has original values
+    g = config.get_agent_briefing("other")
+    assert g["adaptive"] is True
+    assert g["min_cache_age"] == 1800
+
+
 def test_get_agent_extra_context_from_agents_section(tmp_path):
     """extra_context in agents section takes precedence over top-level."""
     (tmp_path / "memory.yaml").write_text("""\

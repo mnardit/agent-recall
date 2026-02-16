@@ -89,7 +89,7 @@ class MemoryConfig:
         result = dict(self.briefing)
         overrides = self.agents_config.get(slug, {})
         for key in ("model", "timeout", "output_budget", "raw_budget",
-                     "cache_max_age"):
+                     "cache_max_age", "min_cache_age", "adaptive"):
             if key in overrides:
                 result[key] = overrides[key]
         return result

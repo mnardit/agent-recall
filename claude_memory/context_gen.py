@@ -282,8 +282,10 @@ def get_agent_status(slug: str, config: MemoryConfig | None = None) -> dict:
     """Get cache/briefing status for an agent.
 
     Returns dict with: slug, has_cache, is_fresh, is_stale, enabled, model,
-    template_type, size_bytes, generated_at, age_seconds.
+    template_type, size_bytes, generated_at, generated_at_iso, age_seconds.
     """
+    from datetime import datetime, timezone
+
     config = config or load_config()
     cache_dir = config.cache_dir
     cache_path = get_cache_path(slug, cache_dir)
@@ -291,9 +293,16 @@ def get_agent_status(slug: str, config: MemoryConfig | None = None) -> dict:
     stale_path = cache_dir / f"{slug}.stale"
 
     has_cache = cache_path.exists()
-    generated_at = cache_path.stat().st_mtime if has_cache else None
+    if has_cache:
+        st = cache_path.stat()
+        generated_at = st.st_mtime
+        size = st.st_size
+    else:
+        generated_at = None
+        size = 0
     age = time.time() - generated_at if generated_at is not None else None
-    size = cache_path.stat().st_size if has_cache else 0
+    generated_iso = (datetime.fromtimestamp(generated_at, tz=timezone.utc).isoformat()
+                     if generated_at is not None else None)
 
     return {
         "slug": slug,
@@ -306,8 +315,15 @@ def get_agent_status(slug: str, config: MemoryConfig | None = None) -> dict:
         "template_type": config.get_agent_template(slug) or config.get_agent_type(slug),
         "size_bytes": size,
         "generated_at": generated_at,
+        "generated_at_iso": generated_iso,
         "age_seconds": round(age) if age is not None else None,
     }
+
+
+def get_all_statuses(config: MemoryConfig | None = None) -> dict[str, dict]:
+    """Get cache status for all known agents. Returns {slug: status_dict}."""
+    config = config or load_config()
+    return {slug: get_agent_status(slug, config) for slug in config.all_agents()}
 
 
 def _save_generation_log(slug: str, entry: dict, cache_dir: Path,

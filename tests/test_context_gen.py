@@ -9,7 +9,7 @@ from claude_memory.context_gen import (
     BUILTIN_TEMPLATES, AGENT_TYPES, load_template, build_prompt,
     is_cache_fresh, get_cache_path, read_cache,
     invalidate_cache, clear_stale_marker, scope_to_agents,
-    get_agent_status, get_generation_logs, LLMResult,
+    get_agent_status, get_all_statuses, get_generation_logs, LLMResult,
     _load_context_files,
     _assemble_orchestrator_context, _assemble_topic_context,
     generate_briefing, generate_all,
@@ -704,6 +704,32 @@ def test_get_agent_status_disabled(tmp_path):
     )
     status = get_agent_status("my-agent", config)
     assert status["enabled"] is False
+
+
+def test_get_agent_status_iso_timestamp(tmp_path, config):
+    """Status includes ISO format timestamp."""
+    _seed_enough_data(config)
+    generate_briefing("acme", config=config, force=True, llm_caller=_fake_llm)
+    status = get_agent_status("acme", config)
+    assert status["generated_at_iso"] is not None
+    assert "T" in status["generated_at_iso"]  # ISO format
+
+
+def test_get_agent_status_no_cache_iso(config):
+    """No cache — ISO timestamp is None."""
+    status = get_agent_status("proj-a", config)
+    assert status["generated_at_iso"] is None
+
+
+def test_get_all_statuses(tmp_path, config):
+    """Batch status for all agents."""
+    _seed_enough_data(config)
+    generate_briefing("acme", config=config, force=True, llm_caller=_fake_llm)
+    statuses = get_all_statuses(config)
+    assert isinstance(statuses, dict)
+    assert "acme" in statuses
+    assert statuses["acme"]["has_cache"] is True
+    assert "boss" in statuses  # orchestrator
 
 
 # --- generation logs ---

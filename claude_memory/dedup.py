@@ -92,39 +92,46 @@ def find_candidates(store: MemoryStore) -> list[dict]:
 
 
 def merge_entities(store: MemoryStore, keep_id: int, remove_id: int) -> None:
-    """Merge remove_id into keep_id: move slots, observations, relations."""
-    # Move slots (skip duplicates)
-    existing_keys = {(s["key"], s["scope"]) for s in store.get_raw_slots(keep_id)}
-    for slot in store.get_raw_slots(remove_id):
-        if (slot["key"], slot["scope"]) not in existing_keys:
-            store.set_slot(keep_id, slot["key"], slot["value"],
-                           scope=slot["scope"], confidence=slot["confidence"],
-                           source=slot["source"])
+    """Merge remove_id into keep_id: move slots, observations, relations.
 
-    # Move observations (skip duplicates by text+scope)
-    existing_obs = {(o["text"], o.get("scope", "global"))
-                    for o in store.get_observations(keep_id)}
-    for obs in store.get_observations(remove_id):
-        if (obs["text"], obs.get("scope", "global")) not in existing_obs:
-            store.add_observation(keep_id, obs["text"],
-                                 scope=obs.get("scope", "global"))
+    The entire merge is atomic — on any failure, all changes are rolled back.
+    """
+    try:
+        # Move slots (skip duplicates)
+        existing_keys = {(s["key"], s["scope"]) for s in store.get_raw_slots(keep_id)}
+        for slot in store.get_raw_slots(remove_id):
+            if (slot["key"], slot["scope"]) not in existing_keys:
+                store.set_slot(keep_id, slot["key"], slot["value"],
+                               scope=slot["scope"], confidence=slot["confidence"],
+                               source=slot["source"])
 
-    # Move relations (outgoing + incoming)
-    outgoing, incoming = store.get_all_relations(remove_id)
-    for rel in outgoing:
-        if rel["to_id"] != keep_id:
-            store.add_relation(keep_id, rel["to_id"], rel["type"],
-                               scope=rel["scope"], context=rel["context"])
-    for rel in incoming:
-        if rel["from_id"] != keep_id:
-            store.add_relation(rel["from_id"], keep_id, rel["type"],
-                               scope=rel["scope"], context=rel["context"])
+        # Move observations (skip duplicates by text+scope)
+        existing_obs = {(o["text"], o.get("scope", "global"))
+                        for o in store.get_observations(keep_id)}
+        for obs in store.get_observations(remove_id):
+            if (obs["text"], obs.get("scope", "global")) not in existing_obs:
+                store.add_observation(keep_id, obs["text"],
+                                     scope=obs.get("scope", "global"))
 
-    # Log the merge
-    remove_entity = store.get_entity(remove_id)
-    remove_name = remove_entity["name"] if remove_entity else f"id={remove_id}"
-    store.add_log(keep_id, f"Merged with '{remove_name}' (id={remove_id})")
+        # Move relations (outgoing + incoming)
+        outgoing, incoming = store.get_all_relations(remove_id)
+        for rel in outgoing:
+            if rel["to_id"] != keep_id:
+                store.add_relation(keep_id, rel["to_id"], rel["type"],
+                                   scope=rel["scope"], context=rel["context"])
+        for rel in incoming:
+            if rel["from_id"] != keep_id:
+                store.add_relation(rel["from_id"], keep_id, rel["type"],
+                                   scope=rel["scope"], context=rel["context"])
 
-    # Delete the old entity (cascades via FK)
-    store.delete_entity(remove_id)
-    store.commit()
+        # Log the merge
+        remove_entity = store.get_entity(remove_id)
+        remove_name = remove_entity["name"] if remove_entity else f"id={remove_id}"
+        store.add_log(keep_id, f"Merged with '{remove_name}' (id={remove_id})")
+
+        # Delete the old entity (cascades via FK)
+        store.delete_entity(remove_id)
+        store.commit()
+    except Exception:
+        store._conn.rollback()
+        raise

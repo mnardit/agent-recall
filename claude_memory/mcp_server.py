@@ -11,11 +11,18 @@ Usage in .mcp.json:
 import json
 from pathlib import Path
 
-from mcp.server.fastmcp import FastMCP
+try:
+    from mcp.server.fastmcp import FastMCP
+except ImportError as e:
+    raise ImportError(
+        "MCP server requires the 'mcp' package. "
+        "Install with: pip install 'claude-memory[mcp]'"
+    ) from e
 
 from claude_memory.mcp_bridge import MCPBridge
 from claude_memory.config import MemoryConfig, load_config
 
+# Singleton bridge — safe for MCP stdio (single-threaded). Not thread-safe.
 bridge: MCPBridge | None = None
 
 

@@ -99,6 +99,14 @@ def test_build_prompt_custom_budget():
     assert "5000" in prompt
 
 
+def test_build_prompt_curly_braces_in_context():
+    """Curly braces in raw_context don't crash str.format()."""
+    raw = 'entity has {key: "value"} and more {stuff}'
+    prompt = build_prompt("agent", "personal", raw)
+    assert '{key: "value"}' in prompt
+    assert "{stuff}" in prompt
+
+
 def test_build_prompt_with_templates_dir(tmp_path):
     templates_dir = tmp_path / "tpl"
     templates_dir.mkdir()
@@ -577,6 +585,31 @@ def test_generate_briefing_template_override_inline(tmp_path):
         return "## Briefing\nGenerated."
     generate_briefing("my-agent", config=config, force=True, llm_caller=capturing_llm)
     assert captured["prompt"].startswith("Custom agent my-agent:")
+
+
+def test_generate_briefing_template_inline_curly_braces(tmp_path):
+    """Inline template with curly braces in raw context doesn't crash."""
+    config = MemoryConfig(
+        db_path=tmp_path / "test.db",
+        cache_dir=tmp_path / "cache",
+        tiers={2: ["my-agent"]},
+        agents_config={"my-agent": {"template": "Agent {slug}: {raw_context}"}},
+        briefing={"model": "haiku", "timeout": 30},
+    )
+    store = MemoryStore(config.db_path)
+    eid = store.resolve_entity("Alice", "person")
+    store.set_slot(eid, "role", "Dev", scope="my-agent")
+    store.set_slot(eid, "data", '{"json": true}', scope="my-agent")
+    store.add_observation(eid, "Has {curly} braces in notes", scope="my-agent")
+    store.close()
+
+    captured = {}
+    def capturing_llm(prompt, model, timeout):
+        captured["prompt"] = prompt
+        return "## Briefing\nGenerated."
+    result = generate_briefing("my-agent", config=config, force=True, llm_caller=capturing_llm)
+    assert result is not None
+    assert "{curly}" in captured["prompt"]
 
 
 def test_generate_briefing_template_type_override(tmp_path):

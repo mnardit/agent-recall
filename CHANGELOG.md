@@ -20,16 +20,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Generation logging with rotation (last 10 entries per agent)
 - ISO 8601 timestamps in status responses (`generated_at_iso`)
 - Comprehensive docstrings on `MemoryStore`, `MCPBridge`, `assemble_context`
+- `py.typed` marker for PEP 561 type checking support
 - CHANGELOG.md
 
 ### Fixed
+- `build_prompt()` / inline templates crash on `{` in raw context (escaped before `.format()`)
+- Path traversal via entity names used as filenames in vault generation
+- Fragile dict key access in log assembly (uses `.get()` with defaults)
 - `get_agent_briefing()` now merges `min_cache_age` and `adaptive` per-agent
 - `get_agent_status()` caches `stat()` call (was calling twice)
 - `load_config()` raises `ValueError` on malformed YAML (was unhandled `ParserError`)
 - `get_agent_status()` raises `ValueError` on empty slug
+- Hardcoded `/tmp/` paths replaced with `tempfile.gettempdir()` (symlink attack prevention)
+- `git push` stderr no longer suppressed in vault auto-commit
+- `merge_entities()` rolls back on partial failure (atomic merge)
 
 ### Changed
-- Dependency pinning: `mcp>=1.0,<2.0` (was `mcp>=1.0`)
+- `mcp` is now an optional dependency: `pip install 'claude-memory[mcp]'`
+- MCP server singleton documents single-threaded assumption
 
 ## [0.1.0] - 2026-02-15
 

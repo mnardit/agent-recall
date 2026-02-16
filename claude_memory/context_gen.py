@@ -176,9 +176,11 @@ def build_prompt(slug: str, agent_type: str, raw_context: str,
                  templates_dir: Path | None = None) -> str:
     """Build the full prompt for LLM from template + raw data."""
     template = load_template(agent_type, templates_dir)
+    # Escape curly braces in raw_context to prevent format() crashes
+    safe_context = raw_context.replace("{", "{{").replace("}", "}}")
     return template.format(
         slug=slug,
-        raw_context=raw_context,
+        raw_context=safe_context,
         budget=output_budget,
     )
 
@@ -489,8 +491,9 @@ def _assemble_orchestrator_context(store: MemoryStore, budget: int) -> str:
     for e in all_entities:
         logs = store.get_logs(e["id"], limit=3)
         for entry in logs:
-            log_lines.append(
-                (entry["date"], f"- [{entry['date']}] {e['name']}: {entry['text']}"))
+            date = entry.get("date", "")
+            text = entry.get("text", "")
+            log_lines.append((date, f"- [{date}] {e['name']}: {text}"))
     log_lines.sort(key=lambda x: x[0], reverse=True)
     if log_lines:
         sections.append("## Recent Log\n" + "\n".join(line for _, line in log_lines[:20]))
@@ -585,8 +588,9 @@ def _assemble_topic_context(store: MemoryStore, slug: str, chain: list[str],
     for e in all_scoped:
         logs = store.get_logs(e["id"], limit=5)
         for entry in logs:
-            log_lines.append(
-                (entry["date"], f"- [{entry['date']}] {e['name']}: {entry['text']}"))
+            date = entry.get("date", "")
+            text = entry.get("text", "")
+            log_lines.append((date, f"- [{date}] {e['name']}: {text}"))
     log_lines.sort(key=lambda x: x[0], reverse=True)
     if log_lines:
         sections.append("## Recent Log\n" + "\n".join(line for _, line in log_lines[:15]))
@@ -714,8 +718,9 @@ def generate_briefing(
         agent_type = custom_template
         prompt = build_prompt(slug, agent_type, raw, output_budget, config.templates_dir)
     elif custom_template:
-        # Inline custom template — format directly
-        prompt = custom_template.format(slug=slug, raw_context=raw, budget=output_budget)
+        # Inline custom template — escape braces in raw context to prevent format() crashes
+        safe_raw = raw.replace("{", "{{").replace("}", "}}")
+        prompt = custom_template.format(slug=slug, raw_context=safe_raw, budget=output_budget)
     else:
         prompt = build_prompt(slug, agent_type, raw, output_budget, config.templates_dir)
     log.info("Generating briefing for %s (%s, %d chars raw)", slug, agent_type, len(raw))

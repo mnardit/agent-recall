@@ -19,13 +19,13 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
 ]
 dependencies = [
-    "mcp>=1.0,<2.0",
     "pyyaml>=6.0",
     "click>=8.0",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-cov"]
+mcp = ["mcp>=1.0,<2.0"]
+dev = ["pytest>=8.0", "pytest-cov", "mcp>=1.0,<2.0"]
 
 [project.scripts]
 claude-memory = "claude_memory.cli:main"

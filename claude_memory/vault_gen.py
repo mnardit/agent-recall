@@ -3,6 +3,7 @@
 Optional output plugin. Only active if vault_dir is configured.
 """
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 
@@ -14,6 +15,14 @@ DEFAULT_RATE_SECONDS = 300  # 5 min
 SKIP_SLOTS = {"name", "clients"}
 DISPLAY_SLOTS = ["role", "company", "email", "phone", "language",
                  "location", "timezone"]
+
+
+def _safe_filename(name: str) -> str:
+    """Sanitize entity name for use as filename (prevents path traversal)."""
+    safe = name.replace("/", "_").replace("\\", "_").replace("\0", "")
+    safe = safe.replace("..", "_")
+    safe = safe.lstrip(".")
+    return safe or "unnamed"
 
 
 def trigger_vault_regen(store: MemoryStore | None = None,
@@ -30,7 +39,7 @@ def trigger_vault_regen(store: MemoryStore | None = None,
     if vault_dir is None or not vault_dir.exists():
         return False
 
-    rf = rate_file or Path("/tmp/claude-memory-vault-regen-last")
+    rf = rate_file or Path(tempfile.gettempdir()) / "claude-memory-vault-regen-last"
 
     # Rate limit (skip if forced)
     if not force and rf.exists():
@@ -63,7 +72,7 @@ def trigger_vault_regen(store: MemoryStore | None = None,
              "git add people/ clients/ decisions/ && "
              "git diff --cached --quiet || "
              "git commit -m 'auto: regenerate from frames.db' && git push"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
         )
     return True
 
@@ -93,7 +102,7 @@ def generate_person(store: MemoryStore, entity_id: int, vault_dir: Path) -> Path
 
     people_dir = vault_dir / "people"
     people_dir.mkdir(parents=True, exist_ok=True)
-    path = people_dir / f"{name}.md"
+    path = people_dir / f"{_safe_filename(name)}.md"
 
     lines = [
         "---",
@@ -132,7 +141,7 @@ def generate_client(store: MemoryStore, entity_id: int, vault_dir: Path) -> Path
 
     clients_dir = vault_dir / "clients"
     clients_dir.mkdir(parents=True, exist_ok=True)
-    path = clients_dir / f"{name}.md"
+    path = clients_dir / f"{_safe_filename(name)}.md"
 
     lines = [
         "---",
@@ -174,6 +183,6 @@ def generate_vault(store: MemoryStore, vault_dir: Path) -> dict[str, int]:
         if full:
             dec_dir = vault_dir / "decisions"
             dec_dir.mkdir(parents=True, exist_ok=True)
-            (dec_dir / f"{doc['name']}.md").write_text(full["content"])
+            (dec_dir / f"{_safe_filename(doc['name'])}.md").write_text(full["content"])
             stats["decisions"] += 1
     return stats

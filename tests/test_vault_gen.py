@@ -3,6 +3,7 @@ import pytest
 from claude_memory.store import MemoryStore
 from claude_memory.vault_gen import (
     generate_person, generate_client, generate_vault, trigger_vault_regen,
+    _safe_filename,
 )
 
 
@@ -193,3 +194,36 @@ def test_trigger_vault_regen_force_bypasses_rate(store, tmp_path):
         rate_file=rate_file, force=True
     )
     assert result is True
+
+
+# --- Filename sanitization ---
+
+def test_safe_filename_normal():
+    assert _safe_filename("Alice Smith") == "Alice Smith"
+
+
+def test_safe_filename_path_traversal():
+    assert "/" not in _safe_filename("../../../etc/passwd")
+    assert ".." not in _safe_filename("../../../etc/passwd")
+
+
+def test_safe_filename_slash():
+    assert "/" not in _safe_filename("Alice/Bob")
+
+
+def test_safe_filename_empty():
+    assert _safe_filename("") == "unnamed"
+
+
+def test_safe_filename_dot_prefix():
+    assert not _safe_filename(".hidden").startswith(".")
+
+
+def test_generate_person_path_traversal(store, tmp_path):
+    """Entity with path traversal in name doesn't escape vault dir."""
+    eid = store.resolve_entity("../../etc/malicious", "person")
+    store.set_slot(eid, "role", "Attacker")
+    path = generate_person(store, eid, tmp_path)
+    # File must stay within people/ dir
+    assert path.parent == tmp_path / "people"
+    assert ".." not in path.name

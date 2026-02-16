@@ -6,6 +6,7 @@ command writes them to the appropriate location.
 import fcntl
 import json
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -115,7 +116,8 @@ def post_tool_use_hook() -> None:
         return
 
     # Rate limit
-    rate_file = Path("/tmp/claude-memory-vault-regen-last")
+    _tmpdir = Path(tempfile.gettempdir())
+    rate_file = _tmpdir / "claude-memory-vault-regen-last"
     rate_seconds = 300
     if rate_file.exists():
         last = rate_file.stat().st_mtime
@@ -123,7 +125,7 @@ def post_tool_use_hook() -> None:
             return
 
     # Acquire exclusive lock (non-blocking)
-    lock_file = Path("/tmp/claude-memory-vault-regen.lock")
+    lock_file = _tmpdir / "claude-memory-vault-regen.lock"
     lock_fd = lock_file.open("w")
     try:
         fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -153,7 +155,7 @@ def post_tool_use_hook() -> None:
              "git add people/ clients/ decisions/ && "
              "git diff --cached --quiet || "
              "git commit -m 'auto: regenerate from frames.db' && git push"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
         )
 
 

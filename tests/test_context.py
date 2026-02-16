@@ -170,3 +170,23 @@ def test_leaf_scope_filter_includes_with_leaf_slots(store):
     eid = _seed_person(store, "LeafPerson", scope="proj-a", role="Dev")
     result = assemble_context(store, ["global", "acme", "proj-a"], tier=2)
     assert "LeafPerson" in result
+
+
+# --- Project Context (observation-only entities) ---
+
+def test_project_context_observation_only(store):
+    """Entity with observations but no slots appears in Project Context."""
+    eid = store.resolve_entity("My Dashboard", "project")
+    store.add_observation(eid, "Feature X deployed", scope="acme")
+    result = assemble_context(store, ["global", "acme"], tier=1)
+    assert "## Project Context" in result
+    assert "My Dashboard" in result
+    assert "Feature X deployed" in result
+
+
+def test_project_context_skips_persons(store):
+    """Person entities don't appear in Project Context."""
+    eid = store.resolve_entity("Alice", "person")
+    store.add_observation(eid, "Some note", scope="acme")
+    result = assemble_context(store, ["global", "acme"], tier=1)
+    assert "## Project Context" not in result

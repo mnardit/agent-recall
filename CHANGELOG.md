@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- Auto-discovery of project files (CLAUDE.md, README.md, .cursorrules, .windsurfrules) for richer briefings — ON by default, disable with `auto_discover: false`
 - Per-agent model override via `agents.<slug>.model` in config
 - Per-agent template override via `agents.<slug>.template` (type name or inline text)
 - Agent enabled/disabled toggle via `agents.<slug>.enabled`
@@ -29,6 +30,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - CHANGELOG.md
 
 ### Fixed
+- `list_entities_in_scopes()` now finds entities with observations-only (no slots) via UNION query — previously invisible
+- `assemble_context()` now includes "Project Context" section (observations for leaf-scope entities) at tier >= 1
 - `build_prompt()` crash on `{` in slug or raw context (both now escaped before `.format()`)
 - Path traversal in vault `_safe_filename()` — uses `Path.name` to strip directory components
 - Git auto-commit race condition — commit now blocks before push starts

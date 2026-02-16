@@ -110,13 +110,43 @@ def assemble_context(store: MemoryStore, chain: list[str], tier: int,
             prio = PRIORITY_USEFUL if is_topic else PRIORITY_IMPORTANT
             pending.append((prio, "Topics", "\n".join(topic_lines)))
 
+    # --- Project context (own scope observations, tier >= 1) ---
+    if tier >= 1:
+        leaf = chain[-1]
+        leaf_entities = store.list_entities_with_observations_in_scope(leaf)
+        proj_lines = []
+        for e in leaf_entities:
+            if e["type"] == "person":
+                continue  # people handled above
+            obs = store.get_observations(e["id"])
+            visible = [o["text"] for o in obs if o.get("scope") == leaf]
+            if visible:
+                slots = store.get_slots(e["id"])
+                header = f"**{e['name']}**"
+                if slots:
+                    s = ", ".join(f"{k}: {v}" for k, v in slots.items())
+                    header += f" ({s})"
+                proj_lines.append(f"- {header}")
+                for o in visible[:15]:
+                    proj_lines.append(f"  - {o}")
+        if proj_lines:
+            pending.append((PRIORITY_MUST, "Project Context",
+                            "\n".join(proj_lines)))
+
     # --- Clients, agencies, projects ---
     if tier >= 2:
+        leaf = chain[-1]
+        # IDs already shown in Project Context section above
+        shown_ids = {e["id"] for e in
+                     store.list_entities_with_observations_in_scope(leaf)
+                     } if tier >= 1 else set()
         for etype in ("client", "agency", "project"):
             entities = view.list_entities(entity_type=etype)
             if entities:
                 lines = []
                 for e in entities:
+                    if e["id"] in shown_ids:
+                        continue  # already in Project Context
                     entity = view.get_entity(e["name"])
                     if entity and entity["slots"]:
                         s = ", ".join(f"{k}: {v}"

@@ -196,16 +196,22 @@ class MemoryStore:
     def list_entities_in_scopes(self, scopes: list[str],
                                 entity_type: str | None = None) -> list[dict]:
         placeholders = ",".join("?" * len(scopes))
-        params: list = list(scopes)
         type_filter = ""
+        type_params: list = []
         if entity_type:
             type_filter = "AND e.type = ?"
-            params.append(entity_type)
+            type_params = [entity_type]
+        # Find entities that have slots OR observations in the given scopes
         rows = self._conn.execute(
             f"SELECT DISTINCT e.id, e.name, e.type FROM entities e "
             f"JOIN slots s ON e.id = s.entity_id "
             f"WHERE s.scope IN ({placeholders}) AND s.valid_to IS NULL {type_filter} "
-            f"ORDER BY e.name", params,
+            f"UNION "
+            f"SELECT DISTINCT e.id, e.name, e.type FROM entities e "
+            f"JOIN observations o ON e.id = o.entity_id "
+            f"WHERE o.scope IN ({placeholders}) AND o.archived_at IS NULL {type_filter} "
+            f"ORDER BY name",
+            list(scopes) + type_params + list(scopes) + type_params,
         ).fetchall()
         return [dict(r) for r in rows]
 

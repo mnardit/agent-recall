@@ -114,6 +114,26 @@ def test_list_entities_in_scopes(store):
     names = {e["name"] for e in visible}
     assert names == {"Max", "Alice"}
 
+def test_list_entities_in_scopes_observation_only(store):
+    """Entity with only observations (no slots) in scope is visible."""
+    eid = store.resolve_entity("Dashboard", "project")
+    store.add_observation(eid, "Web app for agents", scope="dashboard")
+    visible = store.list_entities_in_scopes(["dashboard"])
+    names = {e["name"] for e in visible}
+    assert "Dashboard" in names
+
+
+def test_list_entities_in_scopes_mixed(store):
+    """Both slot-only and observation-only entities appear."""
+    e1 = store.resolve_entity("Alice", "person")
+    store.set_slot(e1, "role", "dev", scope="acme")
+    e2 = store.resolve_entity("Acme Project", "project")
+    store.add_observation(e2, "Important fact", scope="acme")
+    visible = store.list_entities_in_scopes(["acme"])
+    names = {e["name"] for e in visible}
+    assert names == {"Alice", "Acme Project"}
+
+
 # --- History ---
 
 def test_slot_history(store):

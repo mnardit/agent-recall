@@ -181,6 +181,97 @@ def test_extra_context_default_empty(config):
     assert config.extra_context == {}
 
 
+def test_agents_config_parsed(tmp_path):
+    """agents section parsed with per-agent overrides."""
+    (tmp_path / "memory.yaml").write_text("""\
+briefing:
+  model: haiku
+  timeout: 120
+agents:
+  boss:
+    model: opus
+    timeout: 300
+    output_budget: 12000
+  dashboard:
+    model: haiku
+    extra_context: "Dashboard context"
+    context_files:
+      - ~/some/file.md
+""")
+    config = load_config(tmp_path / "memory.yaml")
+    assert config.agents_config["boss"]["model"] == "opus"
+    assert config.agents_config["dashboard"]["extra_context"] == "Dashboard context"
+
+
+def test_get_agent_briefing_merges(tmp_path):
+    """Per-agent settings override global defaults."""
+    (tmp_path / "memory.yaml").write_text("""\
+briefing:
+  model: haiku
+  timeout: 120
+  output_budget: 8000
+agents:
+  boss:
+    model: opus
+    timeout: 300
+""")
+    config = load_config(tmp_path / "memory.yaml")
+    # boss: overrides model + timeout, inherits output_budget
+    b = config.get_agent_briefing("boss")
+    assert b["model"] == "opus"
+    assert b["timeout"] == 300
+    assert b["output_budget"] == 8000
+    # unknown agent: gets global defaults
+    d = config.get_agent_briefing("random")
+    assert d["model"] == "haiku"
+    assert d["timeout"] == 120
+
+
+def test_get_agent_extra_context_from_agents_section(tmp_path):
+    """extra_context in agents section takes precedence over top-level."""
+    (tmp_path / "memory.yaml").write_text("""\
+extra_context:
+  dashboard: "Old top-level context"
+agents:
+  dashboard:
+    extra_context: "New per-agent context"
+""")
+    config = load_config(tmp_path / "memory.yaml")
+    assert config.get_agent_extra_context("dashboard") == "New per-agent context"
+
+
+def test_get_agent_extra_context_fallback(tmp_path):
+    """Falls back to top-level extra_context if not in agents section."""
+    (tmp_path / "memory.yaml").write_text("""\
+extra_context:
+  dashboard: "Top-level context"
+""")
+    config = load_config(tmp_path / "memory.yaml")
+    assert config.get_agent_extra_context("dashboard") == "Top-level context"
+    assert config.get_agent_extra_context("nonexistent") is None
+
+
+def test_get_agent_context_files(tmp_path):
+    """context_files parsed and expanded."""
+    (tmp_path / "memory.yaml").write_text("""\
+agents:
+  dashboard:
+    context_files:
+      - /tmp/file1.md
+      - /tmp/file2.md
+    context_budget: 5000
+""")
+    config = load_config(tmp_path / "memory.yaml")
+    files = config.get_agent_context_files("dashboard")
+    assert len(files) == 2
+    assert files[0] == Path("/tmp/file1.md")
+    assert config.get_agent_context_budget("dashboard") == 5000
+    # Default budget for unknown agent
+    assert config.get_agent_context_budget("unknown") == 3000
+    # No context_files for unknown agent
+    assert config.get_agent_context_files("unknown") == []
+
+
 def test_hierarchy_shorthand(tmp_path):
     """Hierarchy can be specified as parent: [children] shorthand."""
     (tmp_path / "memory.yaml").write_text("""\

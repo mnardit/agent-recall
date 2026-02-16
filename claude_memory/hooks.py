@@ -11,7 +11,10 @@ from pathlib import Path
 
 from claude_memory.config import load_config
 from claude_memory.context import assemble_context
-from claude_memory.context_gen import read_cache
+from claude_memory.context_gen import (
+    read_cache, get_cache_path, generate_briefing,
+    clear_stale_marker,
+)
 from claude_memory.store import MemoryStore
 from claude_memory.vault_gen import generate_vault
 
@@ -35,6 +38,22 @@ def session_start_hook() -> None:
 
         if not config.db_path.exists():
             return
+
+        # Check for stale cache — regenerate if adaptive mode enabled
+        stale_path = config.cache_dir / f"{slug}.stale"
+        if stale_path.exists():
+            min_age = config.briefing.get("min_cache_age", 1800)
+            cache_path = get_cache_path(slug, config.cache_dir)
+            can_regen = (not cache_path.exists() or
+                         time.time() - cache_path.stat().st_mtime >= min_age)
+            if can_regen and config.briefing.get("adaptive", False):
+                try:
+                    generate_briefing(slug, config=config, force=True)
+                except Exception as e:
+                    print(f"Stale regen failed: {e}", file=sys.stderr)
+            else:
+                # Clear stale marker anyway — serve existing cache
+                clear_stale_marker(slug, config.cache_dir)
 
         # Try cached AI briefing first
         cached = read_cache(slug, cache_dir=config.cache_dir)
@@ -73,9 +92,9 @@ WRITE_TOOLS = {
 
 
 def post_tool_use_hook() -> None:
-    """PostToolUse hook — regenerates vault after MCP memory writes.
+    """PostToolUse hook — regenerates vault and invalidates caches after MCP memory writes.
 
-    Input: JSON from stdin with tool_name key.
+    Input: JSON from stdin with tool_name and tool_input keys.
     """
     try:
         data = json.load(sys.stdin)
@@ -87,6 +106,11 @@ def post_tool_use_hook() -> None:
         return
 
     config = load_config()
+
+    # Adaptive cache invalidation — determine affected scopes from tool input
+    if config.briefing.get("adaptive", False):
+        _invalidate_affected_agents(data, config)
+
     if not config.vault_dir or not config.vault_dir.exists():
         return
 
@@ -143,3 +167,32 @@ def main_session_start():
 def main_post_tool_use():
     """Entry point for PostToolUse hook script."""
     post_tool_use_hook()
+
+
+def _invalidate_affected_agents(data: dict, config) -> None:
+    """Determine affected scopes from MCP tool input and invalidate their caches."""
+    from claude_memory.context_gen import invalidate_cache, scope_to_agents
+
+    # Extract scopes from tool_input — depends on tool type
+    tool_input = data.get("tool_input", {})
+    if isinstance(tool_input, str):
+        try:
+            tool_input = json.loads(tool_input)
+        except (json.JSONDecodeError, TypeError):
+            return
+
+    scopes: set[str] = set()
+
+    # Current agent's scope (CWD name)
+    try:
+        scopes.add(Path.cwd().name)
+    except Exception:
+        pass
+
+    # Map scopes to affected agents and invalidate
+    affected: set[str] = set()
+    for scope in scopes:
+        affected.update(scope_to_agents(scope, config))
+
+    if affected:
+        invalidate_cache(sorted(affected), config.cache_dir)

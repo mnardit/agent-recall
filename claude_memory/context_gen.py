@@ -203,10 +203,14 @@ def default_llm_caller(prompt: str, model: str = DEFAULT_MODEL,
 
 def is_cache_fresh(slug: str, cache_dir: Path | None = None,
                    max_age: int = DEFAULT_CACHE_MAX_AGE) -> bool:
-    """Check if cached briefing exists and is younger than max_age."""
+    """Check if cached briefing exists, is younger than max_age, and not stale."""
     cache_dir = cache_dir or _default_cache_dir()
     cache_path = cache_dir / f"{slug}.md"
     if not cache_path.exists():
+        return False
+    # Check for .stale marker (set by adaptive invalidation)
+    stale_path = cache_dir / f"{slug}.stale"
+    if stale_path.exists():
         return False
     age = time.time() - cache_path.stat().st_mtime
     return age < max_age
@@ -232,6 +236,61 @@ def read_cache(slug: str, cache_dir: Path | None = None,
 
 def _default_cache_dir() -> Path:
     return Path.home() / ".claude" / "memory" / "context_cache"
+
+
+# --- Cache Invalidation (adaptive mode) ---
+
+def invalidate_cache(slugs: list[str], cache_dir: Path | None = None) -> list[str]:
+    """Mark agent caches as stale by creating .stale marker files.
+
+    Returns list of slugs that were invalidated.
+    """
+    cache_dir = cache_dir or _default_cache_dir()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    invalidated = []
+    for slug in slugs:
+        cache_path = cache_dir / f"{slug}.md"
+        if cache_path.exists():
+            stale_path = cache_dir / f"{slug}.stale"
+            stale_path.write_text(str(time.time()))
+            invalidated.append(slug)
+            log.info("Invalidated cache for %s", slug)
+    return invalidated
+
+
+def clear_stale_marker(slug: str, cache_dir: Path | None = None) -> None:
+    """Remove .stale marker after successful regeneration."""
+    cache_dir = cache_dir or _default_cache_dir()
+    stale_path = cache_dir / f"{slug}.stale"
+    if stale_path.exists():
+        stale_path.unlink()
+
+
+def scope_to_agents(scope: str, config: MemoryConfig) -> list[str]:
+    """Map a write scope to affected agent slugs.
+
+    A write to scope X invalidates:
+    - Agent X itself (if it's a known agent)
+    - Parent agent (if X is a hierarchy child)
+    - Orchestrator agents (they see everything)
+    """
+    affected: set[str] = set()
+    all_known = set(config.all_agents())
+
+    # The scope itself
+    if scope in all_known:
+        affected.add(scope)
+
+    # Parent: if scope is a hierarchy child, parent is affected
+    for parent, children in config.hierarchy.items():
+        if scope in children:
+            affected.add(parent)
+
+    # Orchestrator agents always affected
+    for slug in config.agent_types.get("orchestrator", []):
+        affected.add(slug)
+
+    return sorted(affected)
 
 
 # --- Orchestrator Context Assembly ---
@@ -418,6 +477,31 @@ def _assemble_topic_context(store: MemoryStore, slug: str, chain: list[str],
     return result[:budget] if len(result) > budget else result
 
 
+# --- Context File Loading ---
+
+def _load_context_files(paths: list[Path], budget: int) -> str:
+    """Read files and concatenate, truncating to budget.
+
+    Missing or unreadable files are skipped with a log warning.
+    """
+    sections: list[str] = []
+    used = 0
+    for path in paths:
+        try:
+            content = path.read_text()
+        except OSError:
+            log.warning("Cannot read context file: %s", path)
+            continue
+        remaining = budget - used
+        if remaining <= 0:
+            break
+        if len(content) > remaining:
+            content = content[:remaining] + "\n... (truncated)"
+        sections.append(f"### {path.name}\n{content}")
+        used += len(content)
+    return "\n\n".join(sections)
+
+
 # --- Generation ---
 
 def generate_briefing(
@@ -439,11 +523,13 @@ def generate_briefing(
     """
     config = config or load_config()
     cache_dir = config.cache_dir
-    cache_max_age = config.briefing.get("cache_max_age", DEFAULT_CACHE_MAX_AGE)
-    raw_budget = config.briefing.get("raw_budget", DEFAULT_RAW_BUDGET)
-    output_budget = config.briefing.get("output_budget", DEFAULT_OUTPUT_BUDGET)
-    model = config.briefing.get("model", DEFAULT_MODEL)
-    timeout = config.briefing.get("timeout", DEFAULT_TIMEOUT)
+    # Per-agent briefing settings (merged with global defaults)
+    agent_briefing = config.get_agent_briefing(slug)
+    cache_max_age = agent_briefing.get("cache_max_age", DEFAULT_CACHE_MAX_AGE)
+    raw_budget = agent_briefing.get("raw_budget", DEFAULT_RAW_BUDGET)
+    output_budget = agent_briefing.get("output_budget", DEFAULT_OUTPUT_BUDGET)
+    model = agent_briefing.get("model", DEFAULT_MODEL)
+    timeout = agent_briefing.get("timeout", DEFAULT_TIMEOUT)
     caller = llm_caller or default_llm_caller
 
     cache_path = get_cache_path(slug, cache_dir)
@@ -482,9 +568,17 @@ def generate_briefing(
             store.close()
 
     # Append per-agent extra context from config
-    extra = config.extra_context.get(slug)
+    extra = config.get_agent_extra_context(slug)
     if extra:
         raw = (raw or "") + f"\n\n## Additional Context\n{extra}"
+
+    # Append content from context_files
+    ctx_files = config.get_agent_context_files(slug)
+    if ctx_files:
+        ctx_budget = config.get_agent_context_budget(slug)
+        file_content = _load_context_files(ctx_files, ctx_budget)
+        if file_content:
+            raw = (raw or "") + f"\n\n## Project Context\n{file_content}"
 
     if not raw or len(raw.strip()) < 50:
         log.info("No meaningful raw context for %s (%d chars)", slug, len(raw or ""))
@@ -500,6 +594,7 @@ def generate_briefing(
 
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_path.write_text(result)
+    clear_stale_marker(slug, cache_dir)
     log.info("Cached briefing for %s (%d chars)", slug, len(result))
     return cache_path
 

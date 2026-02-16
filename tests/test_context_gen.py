@@ -8,6 +8,8 @@ from claude_memory.config import MemoryConfig
 from claude_memory.context_gen import (
     BUILTIN_TEMPLATES, AGENT_TYPES, load_template, build_prompt,
     is_cache_fresh, get_cache_path, read_cache,
+    invalidate_cache, clear_stale_marker, scope_to_agents,
+    _load_context_files,
     _assemble_orchestrator_context, _assemble_topic_context,
     generate_briefing, generate_all,
     DEFAULT_OUTPUT_BUDGET,
@@ -150,6 +152,156 @@ def test_read_cache_stale(tmp_path):
     import os
     os.utime(path, (0, 0))
     assert read_cache("agent", cache_dir) is None
+
+
+# --- Cache invalidation (adaptive mode) ---
+
+def test_invalidate_cache_creates_stale_marker(tmp_path):
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    (cache_dir / "agent-a.md").write_text("cached")
+    (cache_dir / "agent-b.md").write_text("cached")
+
+    result = invalidate_cache(["agent-a", "agent-b"], cache_dir)
+    assert result == ["agent-a", "agent-b"]
+    assert (cache_dir / "agent-a.stale").exists()
+    assert (cache_dir / "agent-b.stale").exists()
+
+
+def test_invalidate_cache_skips_missing(tmp_path):
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    # No cache file for "missing" — should not create stale marker
+    result = invalidate_cache(["missing"], cache_dir)
+    assert result == []
+    assert not (cache_dir / "missing.stale").exists()
+
+
+def test_stale_marker_makes_cache_not_fresh(tmp_path):
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    (cache_dir / "agent.md").write_text("cached")
+    assert is_cache_fresh("agent", cache_dir) is True
+
+    # Mark as stale
+    (cache_dir / "agent.stale").write_text("1")
+    assert is_cache_fresh("agent", cache_dir) is False
+
+
+def test_clear_stale_marker(tmp_path):
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    (cache_dir / "agent.stale").write_text("1")
+    clear_stale_marker("agent", cache_dir)
+    assert not (cache_dir / "agent.stale").exists()
+
+
+def test_generate_briefing_clears_stale(tmp_path, config):
+    """Regenerating a briefing clears the stale marker."""
+    _seed_enough_data(config)
+    cache_dir = config.cache_dir
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create initial cache + stale marker
+    generate_briefing("acme", config=config, force=True, llm_caller=_fake_llm)
+    (cache_dir / "acme.stale").write_text("1")
+    assert is_cache_fresh("acme", cache_dir) is False
+
+    # Regenerate — should clear stale
+    generate_briefing("acme", config=config, force=True, llm_caller=_fake_llm)
+    assert not (cache_dir / "acme.stale").exists()
+    assert is_cache_fresh("acme", cache_dir) is True
+
+
+def test_scope_to_agents_direct(config):
+    """Writing to scope returns the agent itself."""
+    affected = scope_to_agents("acme", config)
+    assert "acme" in affected
+
+
+def test_scope_to_agents_parent(config):
+    """Writing to a child scope also invalidates the parent."""
+    affected = scope_to_agents("proj-a", config)
+    assert "proj-a" in affected
+    assert "acme" in affected  # parent
+
+
+def test_scope_to_agents_orchestrator(config):
+    """Orchestrator agents always in affected set."""
+    affected = scope_to_agents("proj-a", config)
+    assert "boss" in affected
+
+
+def test_scope_to_agents_unknown_scope(config):
+    """Unknown scope — only orchestrator affected."""
+    affected = scope_to_agents("random-scope", config)
+    assert "boss" in affected
+    assert "random-scope" not in affected  # not a known agent
+
+
+# --- Context file loading ---
+
+def test_load_context_files_basic(tmp_path):
+    f1 = tmp_path / "file1.md"
+    f1.write_text("Content of file 1")
+    f2 = tmp_path / "file2.md"
+    f2.write_text("Content of file 2")
+
+    result = _load_context_files([f1, f2], budget=5000)
+    assert "file1.md" in result
+    assert "Content of file 1" in result
+    assert "file2.md" in result
+
+
+def test_load_context_files_budget_truncation(tmp_path):
+    f1 = tmp_path / "big.md"
+    f1.write_text("x" * 500)
+
+    result = _load_context_files([f1], budget=100)
+    assert "truncated" in result
+    assert len(result) < 200  # header + 100 chars + truncation notice
+
+
+def test_load_context_files_missing_skipped(tmp_path):
+    f1 = tmp_path / "exists.md"
+    f1.write_text("Real content")
+    missing = tmp_path / "missing.md"
+
+    result = _load_context_files([missing, f1], budget=5000)
+    assert "Real content" in result
+    assert "missing" not in result
+
+
+def test_generate_briefing_with_context_files(tmp_path):
+    """context_files content reaches the LLM prompt."""
+    ctx_file = tmp_path / "project.md"
+    ctx_file.write_text("# My Project\nImportant project documentation here.")
+
+    config = MemoryConfig(
+        db_path=tmp_path / "test.db",
+        cache_dir=tmp_path / "cache",
+        tiers={1: ["my-agent"]},
+        agents_config={
+            "my-agent": {
+                "context_files": [str(ctx_file)],
+                "context_budget": 5000,
+            },
+        },
+        briefing={"model": "haiku", "timeout": 30},
+    )
+    # Empty DB — context_files alone should provide enough context
+    store = MemoryStore(config.db_path)
+    store.close()
+
+    captured = {}
+    def capturing_llm(prompt, model, timeout):
+        captured["prompt"] = prompt
+        return "## Briefing\nGenerated."
+
+    result = generate_briefing("my-agent", config=config, force=True,
+                               llm_caller=capturing_llm)
+    assert result is not None
+    assert "Important project documentation" in captured["prompt"]
 
 
 # --- Orchestrator context assembly ---
@@ -323,6 +475,37 @@ def test_generate_briefing_topic(tmp_path, config):
     result = generate_briefing("my-topic", config=config, force=True,
                                llm_caller=_fake_llm)
     assert result is not None
+
+
+def test_generate_briefing_per_agent_model(tmp_path):
+    """Per-agent model override reaches the LLM caller."""
+    config = MemoryConfig(
+        db_path=tmp_path / "test.db",
+        cache_dir=tmp_path / "cache",
+        hierarchy={"acme": ["proj-a"]},
+        tiers={2: ["acme", "proj-a"]},
+        briefing={"model": "haiku", "timeout": 60},
+        agents_config={
+            "acme": {"model": "opus", "timeout": 300},
+        },
+    )
+    _seed_enough_data(config)
+
+    captured = {}
+    def capturing_llm(prompt, model, timeout):
+        captured["model"] = model
+        captured["timeout"] = timeout
+        return "## Briefing\nGenerated."
+
+    generate_briefing("acme", config=config, force=True, llm_caller=capturing_llm)
+    assert captured["model"] == "opus"
+    assert captured["timeout"] == 300
+
+    # proj-a: no override, should use global defaults
+    _seed_enough_data(config, scope="proj-a")
+    generate_briefing("proj-a", config=config, force=True, llm_caller=capturing_llm)
+    assert captured["model"] == "haiku"
+    assert captured["timeout"] == 60
 
 
 def test_generate_briefing_extra_context(tmp_path):

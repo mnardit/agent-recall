@@ -29,6 +29,7 @@ class MemoryConfig:
     tiers: dict[int, list[str]] = field(default_factory=dict)
     agent_types: dict[str, list[str]] = field(default_factory=dict)
     briefing: dict[str, Any] = field(default_factory=dict)
+    agents_config: dict[str, dict[str, Any]] = field(default_factory=dict)
     extra_context: dict[str, str] = field(default_factory=dict)
     templates_dir: Path | None = None
     vault_dir: Path | None = None
@@ -79,6 +80,39 @@ class MemoryConfig:
         if agent.tier == 0:
             return "system"
         return "personal"
+
+    def get_agent_briefing(self, slug: str) -> dict[str, Any]:
+        """Get briefing settings for a specific agent.
+
+        Merges global briefing defaults with per-agent overrides from agents_config.
+        """
+        result = dict(self.briefing)
+        overrides = self.agents_config.get(slug, {})
+        for key in ("model", "timeout", "output_budget", "raw_budget",
+                     "cache_max_age"):
+            if key in overrides:
+                result[key] = overrides[key]
+        return result
+
+    def get_agent_extra_context(self, slug: str) -> str | None:
+        """Get extra context for an agent — from agents_config or top-level extra_context."""
+        # Per-agent config takes precedence
+        agent_cfg = self.agents_config.get(slug, {})
+        if "extra_context" in agent_cfg:
+            return agent_cfg["extra_context"]
+        # Backward compat: top-level extra_context dict
+        return self.extra_context.get(slug)
+
+    def get_agent_context_files(self, slug: str) -> list[Path]:
+        """Get context_files list for an agent."""
+        agent_cfg = self.agents_config.get(slug, {})
+        paths = agent_cfg.get("context_files", [])
+        return [_expand_path(p) for p in paths]
+
+    def get_agent_context_budget(self, slug: str) -> int:
+        """Get context_budget for file loading. Default: 3000 chars."""
+        agent_cfg = self.agents_config.get(slug, {})
+        return agent_cfg.get("context_budget", 3000)
 
     def scope_children(self, scope: str) -> set[str]:
         """Get children of a scope from hierarchy."""
@@ -146,6 +180,13 @@ def _parse_config(config_path: Path) -> MemoryConfig:
 
     briefing = data.get("briefing", {})
 
+    # Per-agent config (new agents section)
+    agents_config: dict[str, dict[str, Any]] = {}
+    for slug, agent_data in data.get("agents", {}).items():
+        if isinstance(agent_data, dict):
+            agents_config[slug] = agent_data
+
+    # Backward compat: top-level extra_context (migrated into agents_config)
     extra_context: dict[str, str] = {}
     for slug, text in data.get("extra_context", {}).items():
         if isinstance(text, str):
@@ -174,6 +215,7 @@ def _parse_config(config_path: Path) -> MemoryConfig:
         tiers=tiers,
         agent_types=agent_types,
         briefing=briefing,
+        agents_config=agents_config,
         extra_context=extra_context,
         templates_dir=templates_dir,
         vault_dir=vault_dir,

@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agent-recall"
+version = "0.1.0"
+description = "Persistent memory and AI briefings for coding agents — drop-in MCP server"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [{ name = "Max Nardit", email = "max@nardit.com" }]
+keywords = [
+    "ai", "agents", "ai-agents", "memory", "mcp",
+    "claude", "claude-code", "knowledge-graph", "llm",
+    "model-context-protocol", "sqlite", "briefings",
+    "scope", "context", "coding-agents",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
+dependencies = [
+    "pyyaml>=6.0.2",
+    "click>=8.0",
+]
+
+[project.optional-dependencies]
+mcp = ["mcp>=1.0,<2.0"]
+api = ["anthropic>=0.39"]
+dev = ["pytest>=8.0", "pytest-cov", "mcp>=1.0,<2.0", "anthropic>=0.39"]
+
+[project.scripts]
+agent-recall = "agent_recall.cli:main"
+agent-recall-session-start = "agent_recall.hooks:main_session_start"
+agent-recall-post-tool-use = "agent_recall.hooks:main_post_tool_use"
+
+[project.urls]
+Homepage = "https://github.com/mnardit/agent-recall"
+Repository = "https://github.com/mnardit/agent-recall"
+Documentation = "https://github.com/mnardit/agent-recall#readme"
+Changelog = "https://github.com/mnardit/agent-recall/blob/main/CHANGELOG.md"
+"Bug Tracker" = "https://github.com/mnardit/agent-recall/issues"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

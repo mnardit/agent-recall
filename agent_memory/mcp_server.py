@@ -6,7 +6,7 @@ delete_entities, delete_relations, delete_observations, read_graph, search_nodes
 
 Usage in .mcp.json:
     "command": "python3",
-    "args": ["-m", "claude_memory.mcp_server"]
+    "args": ["-m", "agent_memory.mcp_server"]
 """
 import json
 from pathlib import Path
@@ -16,11 +16,11 @@ try:
 except ImportError as e:
     raise ImportError(
         "MCP server requires the 'mcp' package. "
-        "Install with: pip install 'claude-memory[mcp]'"
+        "Install with: pip install 'agent-memory[mcp]'"
     ) from e
 
-from claude_memory.mcp_bridge import MCPBridge
-from claude_memory.config import MemoryConfig, load_config
+from agent_memory.mcp_bridge import MCPBridge
+from agent_memory.config import MemoryConfig, load_config
 
 # Singleton bridge — safe for MCP stdio (single-threaded). Not thread-safe.
 bridge: MCPBridge | None = None

@@ -1,7 +1,7 @@
 import sqlite3
 
 import pytest
-from claude_memory.store import MemoryStore
+from agent_memory.store import MemoryStore
 
 
 # --- Entities ---

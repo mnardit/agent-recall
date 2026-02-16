@@ -1,7 +1,7 @@
 """Tests for Obsidian vault generation."""
 import pytest
-from claude_memory.store import MemoryStore
-from claude_memory.vault_gen import (
+from agent_memory.store import MemoryStore
+from agent_memory.vault_gen import (
     generate_person, generate_client, generate_vault, trigger_vault_regen,
     _safe_filename,
 )

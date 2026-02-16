@@ -1,7 +1,7 @@
 """Tests for layered context assembly."""
 import pytest
-from claude_memory.store import MemoryStore
-from claude_memory.context import assemble_context
+from agent_memory.store import MemoryStore
+from agent_memory.context import assemble_context
 
 
 @pytest.fixture

@@ -1,7 +1,7 @@
 """Tests for entity deduplication utilities."""
 import pytest
-from claude_memory.store import MemoryStore
-from claude_memory.dedup import (
+from agent_memory.store import MemoryStore
+from agent_memory.dedup import (
     normalize_name, extract_first_name, extract_all_name_parts,
     name_similarity, find_candidates, merge_entities, get_not_same_pairs,
 )

@@ -1,6 +1,6 @@
 import pytest
 from pathlib import Path
-from claude_memory.config import MemoryConfig, load_config, AgentConfig
+from agent_memory.config import MemoryConfig, load_config, AgentConfig
 
 
 YAML_CONTENT = """\

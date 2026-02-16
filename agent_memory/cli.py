@@ -1,12 +1,12 @@
-"""CLI for claude-memory — manage agent memory from the terminal."""
+"""CLI for agent-memory — manage agent memory from the terminal."""
 import json
 import sys
 from pathlib import Path
 
 import click
 
-from claude_memory.config import MemoryConfig, load_config, DEFAULT_DB_PATH
-from claude_memory.store import MemoryStore
+from agent_memory.config import MemoryConfig, load_config, DEFAULT_DB_PATH
+from agent_memory.store import MemoryStore
 
 
 def _store(config: MemoryConfig) -> MemoryStore:
@@ -19,7 +19,7 @@ def _store(config: MemoryConfig) -> MemoryStore:
 @click.option("--db", type=click.Path(), help="Override database path.")
 @click.pass_context
 def main(ctx, config_path, db):
-    """claude-memory — persistent memory with scope hierarchy for AI agents."""
+    """agent-memory — persistent memory with scope hierarchy for AI agents."""
     config = load_config(config_path)
     if db:
         config.db_path = Path(db)
@@ -204,7 +204,7 @@ def show_logs(ctx, entity, limit, as_json):
 @click.pass_context
 def generate(ctx, slug, force):
     """Generate AI briefing for an agent."""
-    from claude_memory.context_gen import generate_briefing
+    from agent_memory.context_gen import generate_briefing
     config = ctx.obj["config"]
     result = generate_briefing(slug, config=config, force=force)
     if result:
@@ -220,7 +220,7 @@ def generate(ctx, slug, force):
 @click.pass_context
 def refresh(ctx, force):
     """Refresh AI briefings for all agents."""
-    from claude_memory.context_gen import generate_all
+    from agent_memory.context_gen import generate_all
     config = ctx.obj["config"]
     results = generate_all(config=config, force=force)
     for slug, status in sorted(results.items()):

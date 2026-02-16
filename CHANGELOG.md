@@ -36,7 +36,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - `merge_entities()` rolls back on partial failure (atomic merge)
 
 ### Changed
-- `mcp` is now an optional dependency: `pip install 'claude-memory[mcp]'`
+- `mcp` is now an optional dependency: `pip install 'agent-memory[mcp]'`
 - MCP server singleton documents single-threaded assumption
 
 ## [0.1.0] - 2026-02-15
@@ -51,5 +51,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - SessionStart hook with cache-first strategy
 - PostToolUse hook for vault regeneration
 - YAML configuration system
-- CLI: `claude-memory init / set / get / search / generate / status`
+- CLI: `agent-memory init / set / get / search / generate / status`
 - 249 tests

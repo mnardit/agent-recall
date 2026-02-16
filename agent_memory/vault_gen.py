@@ -7,7 +7,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from claude_memory.store import MemoryStore
+from agent_memory.store import MemoryStore
 
 DEFAULT_RATE_SECONDS = 300  # 5 min
 
@@ -39,7 +39,7 @@ def trigger_vault_regen(store: MemoryStore | None = None,
     if vault_dir is None or not vault_dir.exists():
         return False
 
-    rf = rate_file or Path(tempfile.gettempdir()) / "claude-memory-vault-regen-last"
+    rf = rate_file or Path(tempfile.gettempdir()) / "agent-memory-vault-regen-last"
 
     # Rate limit (skip if forced)
     if not force and rf.exists():
@@ -53,7 +53,7 @@ def trigger_vault_regen(store: MemoryStore | None = None,
     close_store = False
     if store is None:
         if db_path is None:
-            from claude_memory.config import DEFAULT_DB_PATH
+            from agent_memory.config import DEFAULT_DB_PATH
             db_path = DEFAULT_DB_PATH
         store = MemoryStore(db_path)
         close_store = True

@@ -5,9 +5,9 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
-from claude_memory.config import MemoryConfig
-from claude_memory.store import MemoryStore
-from claude_memory.hooks import WRITE_TOOLS, _invalidate_affected_agents
+from agent_memory.config import MemoryConfig
+from agent_memory.store import MemoryStore
+from agent_memory.hooks import WRITE_TOOLS, _invalidate_affected_agents
 
 
 @pytest.fixture
@@ -42,14 +42,14 @@ def test_session_start_with_cache(seeded_config, capsys):
     cache_dir.mkdir(parents=True)
     (cache_dir / "acme.md").write_text("# Cached Briefing\nHello!")
 
-    with patch("claude_memory.hooks.load_config", return_value=config), \
-         patch("claude_memory.hooks.Path") as MockPath:
+    with patch("agent_memory.hooks.load_config", return_value=config), \
+         patch("agent_memory.hooks.Path") as MockPath:
         # Mock cwd to return "acme" as slug
         mock_cwd = MockPath.cwd.return_value
         mock_cwd.name = "acme"
         mock_cwd.parent.name = "projects"
 
-        from claude_memory.hooks import session_start_hook
+        from agent_memory.hooks import session_start_hook
         session_start_hook()
 
     captured = capsys.readouterr()
@@ -61,14 +61,14 @@ def test_session_start_raw_fallback(seeded_config, capsys):
     """Hook falls back to raw context when no cache."""
     config = seeded_config
 
-    with patch("claude_memory.hooks.load_config", return_value=config), \
-         patch("claude_memory.hooks.Path") as MockPath:
+    with patch("agent_memory.hooks.load_config", return_value=config), \
+         patch("agent_memory.hooks.Path") as MockPath:
         mock_cwd = MockPath.cwd.return_value
         mock_cwd.name = "acme"
         mock_cwd.parent.name = "projects"
         # read_cache needs real Path for cache_dir
-        with patch("claude_memory.hooks.read_cache", return_value=None):
-            from claude_memory.hooks import session_start_hook
+        with patch("agent_memory.hooks.read_cache", return_value=None):
+            from agent_memory.hooks import session_start_hook
             session_start_hook()
 
     captured = capsys.readouterr()
@@ -82,13 +82,13 @@ def test_session_start_tier0_silent(seeded_config, capsys):
     config = seeded_config
     config.tiers = {0: ["infra-bot"]}
 
-    with patch("claude_memory.hooks.load_config", return_value=config), \
-         patch("claude_memory.hooks.Path") as MockPath:
+    with patch("agent_memory.hooks.load_config", return_value=config), \
+         patch("agent_memory.hooks.Path") as MockPath:
         mock_cwd = MockPath.cwd.return_value
         mock_cwd.name = "infra-bot"
         mock_cwd.parent.name = "projects"
 
-        from claude_memory.hooks import session_start_hook
+        from agent_memory.hooks import session_start_hook
         session_start_hook()
 
     captured = capsys.readouterr()
@@ -110,10 +110,10 @@ def test_post_tool_use_ignores_read_tools(seeded_config):
     config.vault_dir = Path("/tmp/test-vault")
 
     stdin_data = json.dumps({"tool_name": "mcp__memory__read_graph"})
-    with patch("claude_memory.hooks.load_config", return_value=config), \
+    with patch("agent_memory.hooks.load_config", return_value=config), \
          patch("sys.stdin", StringIO(stdin_data)), \
-         patch("claude_memory.hooks.generate_vault") as mock_gen:
-        from claude_memory.hooks import post_tool_use_hook
+         patch("agent_memory.hooks.generate_vault") as mock_gen:
+        from agent_memory.hooks import post_tool_use_hook
         post_tool_use_hook()
     mock_gen.assert_not_called()
 
@@ -209,14 +209,14 @@ def test_session_start_stale_regen_adaptive(seeded_config, capsys):
     (cache_dir / "acme.md").write_text("# Old Briefing")
     (cache_dir / "acme.stale").write_text("1")
 
-    with patch("claude_memory.hooks.load_config", return_value=config), \
-         patch("claude_memory.hooks.Path") as MockPath, \
-         patch("claude_memory.hooks.generate_briefing") as mock_gen:
+    with patch("agent_memory.hooks.load_config", return_value=config), \
+         patch("agent_memory.hooks.Path") as MockPath, \
+         patch("agent_memory.hooks.generate_briefing") as mock_gen:
         mock_cwd = MockPath.cwd.return_value
         mock_cwd.name = "acme"
         mock_gen.return_value = cache_dir / "acme.md"
 
-        from claude_memory.hooks import session_start_hook
+        from agent_memory.hooks import session_start_hook
         session_start_hook()
 
     mock_gen.assert_called_once()
@@ -232,12 +232,12 @@ def test_session_start_stale_no_adaptive(seeded_config, capsys):
     (cache_dir / "acme.md").write_text("# Old Briefing")
     (cache_dir / "acme.stale").write_text("1")
 
-    with patch("claude_memory.hooks.load_config", return_value=config), \
-         patch("claude_memory.hooks.Path") as MockPath:
+    with patch("agent_memory.hooks.load_config", return_value=config), \
+         patch("agent_memory.hooks.Path") as MockPath:
         mock_cwd = MockPath.cwd.return_value
         mock_cwd.name = "acme"
 
-        from claude_memory.hooks import session_start_hook
+        from agent_memory.hooks import session_start_hook
         session_start_hook()
 
     # Stale cleared, old briefing served

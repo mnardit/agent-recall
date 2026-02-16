@@ -1,4 +1,4 @@
-# Example configuration for claude-memory
+# Example configuration for agent-memory
 # Place in your project root or ~/.claude/memory/memory.yaml
 
 # Database path (default: ~/.claude/memory/frames.db)

@@ -1,4 +1,4 @@
-"""YAML-based configuration for claude-memory."""
+"""YAML-based configuration for agent-memory."""
 import yaml
 from dataclasses import dataclass, field
 from pathlib import Path

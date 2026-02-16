@@ -6,8 +6,8 @@ Oversized sections are truncated by entries, never silently dropped.
 """
 from pathlib import Path
 
-from claude_memory.store import MemoryStore
-from claude_memory.hierarchy import ScopedView
+from agent_memory.store import MemoryStore
+from agent_memory.hierarchy import ScopedView
 
 # Priority tiers (lower = more important, gets budget first)
 PRIORITY_MUST = 1

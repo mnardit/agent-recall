@@ -1,7 +1,7 @@
 """Entity deduplication utilities — fuzzy name matching and merge logic."""
 import re
 
-from claude_memory.store import MemoryStore
+from agent_memory.store import MemoryStore
 
 
 def normalize_name(name: str) -> str:

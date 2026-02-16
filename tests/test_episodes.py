@@ -1,6 +1,6 @@
 import pytest
 from pathlib import Path
-from claude_memory.episodes import save_episode, load_recent_episodes
+from agent_memory.episodes import save_episode, load_recent_episodes
 
 
 @pytest.fixture

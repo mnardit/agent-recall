@@ -1,5 +1,5 @@
 import pytest
-from claude_memory.store import MemoryStore
+from agent_memory.store import MemoryStore
 
 
 @pytest.fixture

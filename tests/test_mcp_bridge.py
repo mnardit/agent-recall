@@ -1,7 +1,7 @@
 """Tests for MCP bridge — scope enforcement and CRUD operations."""
 import pytest
-from claude_memory.config import MemoryConfig
-from claude_memory.mcp_bridge import MCPBridge
+from agent_memory.config import MemoryConfig
+from agent_memory.mcp_bridge import MCPBridge
 
 
 @pytest.fixture

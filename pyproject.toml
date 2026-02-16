@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "claude-memory"
+name = "agent-memory"
 version = "0.1.0"
 description = "Persistent memory with scope hierarchy for AI agents in Claude Code"
 readme = "README.md"
@@ -28,13 +28,13 @@ mcp = ["mcp>=1.0,<2.0"]
 dev = ["pytest>=8.0", "pytest-cov", "mcp>=1.0,<2.0"]
 
 [project.scripts]
-claude-memory = "claude_memory.cli:main"
-claude-memory-session-start = "claude_memory.hooks:main_session_start"
-claude-memory-post-tool-use = "claude_memory.hooks:main_post_tool_use"
+agent-memory = "agent_memory.cli:main"
+agent-memory-session-start = "agent_memory.hooks:main_session_start"
+agent-memory-post-tool-use = "agent_memory.hooks:main_post_tool_use"
 
 [project.urls]
-Homepage = "https://github.com/mnardit/claude-memory"
-Repository = "https://github.com/mnardit/claude-memory"
+Homepage = "https://github.com/mnardit/agent-memory"
+Repository = "https://github.com/mnardit/agent-memory"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

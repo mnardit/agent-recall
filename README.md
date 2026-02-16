@@ -1,4 +1,4 @@
-# claude-memory
+# agent-memory
 
 Persistent memory with scope hierarchy for AI agents in Claude Code.
 
@@ -16,19 +16,19 @@ SQLite-backed knowledge graph with scoped slots, observations, relations, and AI
 - **Status API** — query cache freshness, generation logs, token usage per agent
 - **Vault generation** — optional Obsidian-compatible markdown output
 - **Entity deduplication** — fuzzy name matching and atomic merge
-- **CLI** — `claude-memory` command with init, search, generate, status, and more
+- **CLI** — `agent-memory` command with init, search, generate, status, and more
 - **Hooks** — SessionStart (inject context) and PostToolUse (auto-regen vault, cache invalidation)
 
 ## Install
 
 ```bash
-pip install claude-memory
+pip install agent-memory
 ```
 
 For MCP server support:
 
 ```bash
-pip install 'claude-memory[mcp]'
+pip install 'agent-memory[mcp]'
 ```
 
 ## Quick Start
@@ -36,7 +36,7 @@ pip install 'claude-memory[mcp]'
 ### 1. Initialize
 
 ```bash
-claude-memory init
+agent-memory init
 ```
 
 Creates the SQLite database at `~/.claude/memory/frames.db`.
@@ -97,7 +97,7 @@ Add to your project's `.mcp.json`:
   "mcpServers": {
     "memory": {
       "command": "python3",
-      "args": ["-m", "claude_memory.mcp_server"]
+      "args": ["-m", "agent_memory.mcp_server"]
     }
   }
 }
@@ -113,10 +113,10 @@ Add to your Claude Code settings (`.claude/settings.json`):
 {
   "hooks": {
     "SessionStart": [
-      { "command": "claude-memory-session-start" }
+      { "command": "agent-memory-session-start" }
     ],
     "PostToolUse": [
-      { "command": "claude-memory-post-tool-use" }
+      { "command": "agent-memory-post-tool-use" }
     ]
   }
 }
@@ -129,10 +129,10 @@ The PostToolUse hook regenerates vault files and invalidates affected caches aft
 
 ```bash
 # Single agent
-claude-memory generate my-agent --force
+agent-memory generate my-agent --force
 
 # All agents
-claude-memory refresh --force
+agent-memory refresh --force
 ```
 
 ## CLI Commands
@@ -157,7 +157,7 @@ All commands accept `--db` and `--config` overrides.
 ## Python API
 
 ```python
-from claude_memory import MemoryStore, ScopedView, MemoryConfig, load_config
+from agent_memory import MemoryStore, ScopedView, MemoryConfig, load_config
 
 # Direct store access
 with MemoryStore("memory.db") as store:
@@ -174,7 +174,7 @@ with MemoryStore("memory.db") as store:
 ### AI Briefing API
 
 ```python
-from claude_memory import generate_briefing, get_agent_status, LLMResult
+from agent_memory import generate_briefing, get_agent_status, LLMResult
 
 # Generate a briefing
 path = generate_briefing("my-agent", force=True)
@@ -251,8 +251,8 @@ The `agents` section in `memory.yaml` allows per-agent overrides:
 ## Development
 
 ```bash
-git clone https://github.com/mnardit/claude-memory.git
-cd claude-memory
+git clone https://github.com/mnardit/agent-memory.git
+cd agent-memory
 pip install -e ".[dev]"
 pytest
 ```

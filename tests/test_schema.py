@@ -1,4 +1,4 @@
-from claude_memory.schema import SlotDef, FrameSchema, BUILTIN_SCHEMAS
+from agent_memory.schema import SlotDef, FrameSchema, BUILTIN_SCHEMAS
 
 
 def test_person_schema_exists():

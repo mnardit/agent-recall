@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Add enabled toggle, custom templates, agent status API, generation logging, and cost tracking to claude-memory — everything the dashboard needs for full briefing management.
+**Goal:** Add enabled toggle, custom templates, agent status API, generation logging, and cost tracking to agent-memory — everything the dashboard needs for full briefing management.
 
 **Architecture:** All features live in the library (config.py, context_gen.py). Dashboard consumes them via Python imports. No dashboard code changes in this plan — only library API. Config changes are backward-compatible (new optional fields).
 
@@ -13,8 +13,8 @@
 ### Task 1: Agent enabled/disabled toggle
 
 **Files:**
-- Modify: `claude_memory/config.py` — add `get_agent_enabled(slug)` method
-- Modify: `claude_memory/context_gen.py` — check enabled in `generate_briefing` and `generate_all`
+- Modify: `agent_memory/config.py` — add `get_agent_enabled(slug)` method
+- Modify: `agent_memory/context_gen.py` — check enabled in `generate_briefing` and `generate_all`
 - Modify: `tests/test_config.py` — test enabled parsing
 - Modify: `tests/test_context_gen.py` — test skip on disabled
 
@@ -38,7 +38,7 @@ agents:
 
 **Step 2: Run tests — expect FAIL (method doesn't exist)**
 
-Run: `cd /home/yahont/projects/personal/claude-memory && python3 -m pytest tests/test_config.py::test_get_agent_enabled_default tests/test_config.py::test_get_agent_enabled_false -v`
+Run: `cd /home/yahont/projects/personal/agent-memory && python3 -m pytest tests/test_config.py::test_get_agent_enabled_default tests/test_config.py::test_get_agent_enabled_false -v`
 
 **Step 3: Implement `get_agent_enabled` in config.py**
 
@@ -106,12 +106,12 @@ if not config.get_agent_enabled(slug):
 
 **Step 7: Run all tests**
 
-Run: `cd /home/yahont/projects/personal/claude-memory && python3 -m pytest tests/ -q`
+Run: `cd /home/yahont/projects/personal/agent-memory && python3 -m pytest tests/ -q`
 
 **Step 8: Commit**
 
 ```bash
-git add claude_memory/config.py claude_memory/context_gen.py tests/test_config.py tests/test_context_gen.py
+git add agent_memory/config.py agent_memory/context_gen.py tests/test_config.py tests/test_context_gen.py
 git commit -m "feat: agent enabled/disabled toggle"
 ```
 
@@ -122,8 +122,8 @@ git commit -m "feat: agent enabled/disabled toggle"
 Per-agent `template` field — either a type name ("client", "personal") or inline text with `{slug}`, `{raw_context}`, `{budget}` placeholders.
 
 **Files:**
-- Modify: `claude_memory/config.py` — add `get_agent_template(slug)`
-- Modify: `claude_memory/context_gen.py` — use per-agent template in `generate_briefing`
+- Modify: `agent_memory/config.py` — add `get_agent_template(slug)`
+- Modify: `agent_memory/context_gen.py` — use per-agent template in `generate_briefing`
 - Modify: `tests/test_config.py` — test template parsing
 - Modify: `tests/test_context_gen.py` — test template override reaching LLM
 
@@ -241,7 +241,7 @@ git commit -m "feat: per-agent prompt template override"
 Function `get_agent_status(slug, config)` returning a dict with cache metadata. Dashboard calls this to show last-generated time, stale status, cache size.
 
 **Files:**
-- Modify: `claude_memory/context_gen.py` — add `get_agent_status()` function
+- Modify: `agent_memory/context_gen.py` — add `get_agent_status()` function
 - Modify: `tests/test_context_gen.py` — test status for cached, stale, missing agents
 
 **Step 1: Write failing tests**
@@ -346,7 +346,7 @@ git commit -m "feat: get_agent_status() for cache metadata queries"
 Capture timing, token estimates, errors per generation. Store in `<cache_dir>/<slug>.log.json`. Last N runs kept (configurable, default 10).
 
 **Files:**
-- Modify: `claude_memory/context_gen.py` — add `GenerationLog` dataclass, `_save_log`, `get_agent_logs`; update `generate_briefing` to record logs
+- Modify: `agent_memory/context_gen.py` — add `GenerationLog` dataclass, `_save_log`, `get_agent_logs`; update `generate_briefing` to record logs
 - Modify: `tests/test_context_gen.py` — test log creation, reading, rotation
 
 **Step 1: Write failing tests**
@@ -471,7 +471,7 @@ git commit -m "feat: generation log capture with rotation"
 Extend `LLMCaller` to optionally return token counts. Add `LLMResult` dataclass for structured return. Backward-compatible — old callers returning `str | None` still work.
 
 **Files:**
-- Modify: `claude_memory/context_gen.py` — add `LLMResult`, update log entries with token data
+- Modify: `agent_memory/context_gen.py` — add `LLMResult`, update log entries with token data
 - Modify: `tests/test_context_gen.py` — test token tracking
 
 **Step 1: Write failing tests**
@@ -552,7 +552,7 @@ git commit -m "feat: LLMResult with token tracking for cost analysis"
 Ensure all new functions are properly exported, update `__init__.py` and verify import ergonomics.
 
 **Files:**
-- Modify: `claude_memory/__init__.py` — add new exports
+- Modify: `agent_memory/__init__.py` — add new exports
 - Modify: `tests/test_context_gen.py` — verify imports at top (already done per task)
 
 **Step 1: Read current `__init__.py`**
@@ -560,7 +560,7 @@ Ensure all new functions are properly exported, update `__init__.py` and verify 
 **Step 2: Add new exports**
 
 ```python
-from claude_memory.context_gen import (
+from agent_memory.context_gen import (
     get_agent_status,
     get_generation_logs,
     LLMResult,
@@ -571,7 +571,7 @@ from claude_memory.context_gen import (
 
 ```python
 def test_public_api_exports():
-    from claude_memory import (
+    from agent_memory import (
         get_agent_status,
         get_generation_logs,
         LLMResult,

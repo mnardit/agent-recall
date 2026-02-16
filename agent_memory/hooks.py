@@ -10,14 +10,14 @@ import tempfile
 import time
 from pathlib import Path
 
-from claude_memory.config import load_config
-from claude_memory.context import assemble_context
-from claude_memory.context_gen import (
+from agent_memory.config import load_config
+from agent_memory.context import assemble_context
+from agent_memory.context_gen import (
     read_cache, get_cache_path, generate_briefing,
     clear_stale_marker, invalidate_cache, scope_to_agents,
 )
-from claude_memory.store import MemoryStore
-from claude_memory.vault_gen import generate_vault
+from agent_memory.store import MemoryStore
+from agent_memory.vault_gen import generate_vault
 
 
 # --- SessionStart Hook ---
@@ -117,7 +117,7 @@ def post_tool_use_hook() -> None:
 
     # Rate limit
     _tmpdir = Path(tempfile.gettempdir())
-    rate_file = _tmpdir / "claude-memory-vault-regen-last"
+    rate_file = _tmpdir / "agent-memory-vault-regen-last"
     rate_seconds = 300
     if rate_file.exists():
         last = rate_file.stat().st_mtime
@@ -125,7 +125,7 @@ def post_tool_use_hook() -> None:
             return
 
     # Acquire exclusive lock (non-blocking)
-    lock_file = _tmpdir / "claude-memory-vault-regen.lock"
+    lock_file = _tmpdir / "agent-memory-vault-regen.lock"
     lock_fd = lock_file.open("w")
     try:
         fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)

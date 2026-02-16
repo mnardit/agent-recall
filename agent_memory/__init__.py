@@ -1,13 +1,13 @@
-"""claude-memory — Persistent memory with scope hierarchy for AI agents."""
+"""agent-memory — Persistent memory with scope hierarchy for AI agents."""
 
 __version__ = "0.1.0"
 
-from claude_memory.store import MemoryStore
-from claude_memory.hierarchy import ScopedView
-from claude_memory.config import MemoryConfig, AgentConfig, load_config
-from claude_memory.mcp_bridge import MCPBridge
-from claude_memory.context import assemble_context
-from claude_memory.context_gen import (
+from agent_memory.store import MemoryStore
+from agent_memory.hierarchy import ScopedView
+from agent_memory.config import MemoryConfig, AgentConfig, load_config
+from agent_memory.mcp_bridge import MCPBridge
+from agent_memory.context import assemble_context
+from agent_memory.context_gen import (
     get_agent_status,
     get_all_statuses,
     get_generation_logs,

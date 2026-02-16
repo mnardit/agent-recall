@@ -12,9 +12,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from claude_memory.config import MemoryConfig, AgentConfig, load_config
-from claude_memory.context import assemble_context
-from claude_memory.store import MemoryStore
+from agent_memory.config import MemoryConfig, AgentConfig, load_config
+from agent_memory.context import assemble_context
+from agent_memory.store import MemoryStore
 
 log = logging.getLogger(__name__)
 

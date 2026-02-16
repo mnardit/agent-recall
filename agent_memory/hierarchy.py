@@ -1,5 +1,5 @@
 """Hierarchical scope queries — chain-based inheritance using store methods only."""
-from claude_memory.store import MemoryStore
+from agent_memory.store import MemoryStore
 
 
 class ScopedView:

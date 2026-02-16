@@ -3,8 +3,8 @@ import json
 import pytest
 from click.testing import CliRunner
 
-from claude_memory.cli import main
-from claude_memory.store import MemoryStore
+from agent_memory.cli import main
+from agent_memory.store import MemoryStore
 
 
 @pytest.fixture

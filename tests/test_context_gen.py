@@ -3,9 +3,9 @@ import time
 import pytest
 from pathlib import Path
 
-from claude_memory.store import MemoryStore
-from claude_memory.config import MemoryConfig
-from claude_memory.context_gen import (
+from agent_memory.store import MemoryStore
+from agent_memory.config import MemoryConfig
+from agent_memory.context_gen import (
     BUILTIN_TEMPLATES, AGENT_TYPES, load_template, build_prompt,
     is_cache_fresh, get_cache_path, read_cache,
     invalidate_cache, clear_stale_marker, scope_to_agents,

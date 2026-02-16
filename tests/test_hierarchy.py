@@ -1,6 +1,6 @@
 import pytest
-from claude_memory.store import MemoryStore
-from claude_memory.hierarchy import ScopedView
+from agent_memory.store import MemoryStore
+from agent_memory.hierarchy import ScopedView
 
 
 @pytest.fixture

@@ -6,8 +6,8 @@ Scope enforcement: agents can only write to entities in their scope tree.
 """
 from pathlib import Path
 
-from claude_memory.config import MemoryConfig
-from claude_memory.store import MemoryStore
+from agent_memory.config import MemoryConfig
+from agent_memory.store import MemoryStore
 
 
 class MCPBridge:

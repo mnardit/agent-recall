@@ -35,7 +35,8 @@ class MCPBridge:
 
     def __init__(self, db_path: Path | str, default_scope: str = "global",
                  scope_chain: list[str] | None = None,
-                 config: MemoryConfig | None = None) -> None:
+                 config: MemoryConfig | None = None,
+                 strict_scopes: bool = False) -> None:
         self._store = MemoryStore(db_path)
         self._scope = default_scope
         self._chain = scope_chain or []
@@ -43,6 +44,14 @@ class MCPBridge:
         self._allowed_scopes = self._compute_allowed_scopes()
         # Only enforce for agents with chain > 1 (skip orchestrator/tier0)
         self._enforce = len(self._chain) > 1
+        # Validate scope against known scopes at init time
+        if strict_scopes and config:
+            known = config.known_scopes()
+            if self._scope not in known:
+                raise ValueError(
+                    f"Scope {self._scope!r} not in known scopes. "
+                    f"Check memory.yaml hierarchy or AGENT_RECALL_SLUG."
+                )
 
     def _compute_allowed_scopes(self) -> set[str]:
         allowed = set(self._chain)
@@ -147,6 +156,7 @@ class MCPBridge:
                 continue
             entity_id = self._store.find_entity(item["entityName"])
             if entity_id is None:
+                blocked.append(f"Entity not found: '{item['entityName']}'")
                 continue
             ok, reason = self._entity_writable(entity_id)
             if not ok:
@@ -164,6 +174,7 @@ class MCPBridge:
         for name in names:
             entity_id = self._store.find_entity(name)
             if entity_id is None:
+                blocked.append(f"Entity not found: '{name}'")
                 continue
             ok, reason = self._entity_writable(entity_id)
             if not ok:
@@ -181,6 +192,12 @@ class MCPBridge:
             from_id = self._store.find_entity(r["from"])
             to_id = self._store.find_entity(r["to"])
             if from_id is None or to_id is None:
+                missing = []
+                if from_id is None:
+                    missing.append(r["from"])
+                if to_id is None:
+                    missing.append(r["to"])
+                blocked.append(f"Entity not found: {', '.join(repr(m) for m in missing)}")
                 continue
             if self._enforce:
                 from_ok = self._entity_writable(from_id)[0]
@@ -208,6 +225,7 @@ class MCPBridge:
                 continue
             entity_id = self._store.find_entity(item["entityName"])
             if entity_id is None:
+                blocked.append(f"Entity not found: '{item['entityName']}'")
                 continue
             ok, reason = self._entity_writable(entity_id)
             if not ok:

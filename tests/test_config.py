@@ -353,3 +353,56 @@ hierarchy:
 """)
     config = load_config(tmp_path / "memory.yaml")
     assert config.hierarchy["acme"] == ["client-a", "client-b"]
+
+
+# --- known_scopes ---
+
+def test_known_scopes_includes_hierarchy(config):
+    """known_scopes() includes all hierarchy parents and children."""
+    scopes = config.known_scopes()
+    assert "global" in scopes
+    assert "acme" in scopes
+    assert "client-a" in scopes
+    assert "client-b" in scopes
+    assert "other-org" in scopes
+    assert "project-x" in scopes
+
+
+def test_known_scopes_includes_tiers(config):
+    """known_scopes() includes slugs from all tiers."""
+    scopes = config.known_scopes()
+    assert "sync-bot" in scopes
+    assert "data-fetcher" in scopes
+    assert "dashboard" in scopes
+
+
+def test_known_scopes_includes_agent_types(config):
+    """known_scopes() includes slugs from agent_types."""
+    scopes = config.known_scopes()
+    assert "boss" in scopes
+
+
+def test_known_scopes_empty_config():
+    """Empty config returns just {'global'}."""
+    config = MemoryConfig()
+    assert config.known_scopes() == {"global"}
+
+
+# --- get_agent warning ---
+
+def test_get_agent_warns_on_fallback(config, caplog):
+    """Unknown slug triggers a warning via logging."""
+    import logging
+    with caplog.at_level(logging.WARNING, logger="agent_recall"):
+        agent = config.get_agent("totally-unknown")
+    assert agent.chain == ["global", "totally-unknown"]
+    assert "Unknown slug" in caplog.text
+    assert "totally-unknown" in caplog.text
+
+
+def test_get_agent_no_warning_for_known(config, caplog):
+    """Known slugs (hierarchy child) do NOT trigger warning."""
+    import logging
+    with caplog.at_level(logging.WARNING, logger="agent_recall"):
+        config.get_agent("client-a")
+    assert "Unknown slug" not in caplog.text

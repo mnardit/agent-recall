@@ -1,8 +1,11 @@
 """YAML-based configuration for agent-recall."""
+import logging
 import yaml
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger("agent_recall")
 
 
 DEFAULT_CONFIG_PATHS = [
@@ -36,6 +39,22 @@ class MemoryConfig:
     vault_task_header: str = "## Tasks"
     vault_auto_commit: bool = True
 
+    def known_scopes(self) -> set[str]:
+        """Return all valid scope strings from this configuration.
+
+        Includes "global" plus all slugs found in hierarchy (parents and
+        children), tiers, and agent_types.
+        """
+        scopes = {"global"}
+        for parent, children in self.hierarchy.items():
+            scopes.add(parent)
+            scopes.update(children)
+        for slugs in self.tiers.values():
+            scopes.update(slugs)
+        for slugs in self.agent_types.values():
+            scopes.update(slugs)
+        return scopes
+
     def get_agent(self, slug: str) -> AgentConfig:
         """Infer agent config from slug using hierarchy + tiers + agent_types."""
         # Check orchestrator
@@ -59,7 +78,11 @@ class MemoryConfig:
         # Check if slug IS a parent
         if slug in self.hierarchy:
             return AgentConfig(slug=slug, tier=2, chain=["global", slug])
-        # Default: tier 2 standalone
+        # Fallback: unknown slug — emit warning
+        logger.warning(
+            "Unknown slug %r, using default chain ['global', '%s']",
+            slug, slug,
+        )
         return AgentConfig(slug=slug, tier=2, chain=["global", slug])
 
     def get_agent_type(self, slug: str) -> str:

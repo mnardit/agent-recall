@@ -190,3 +190,96 @@ def test_project_context_skips_persons(store):
     store.add_observation(eid, "Some note", scope="acme")
     result = assemble_context(store, ["global", "acme"], tier=1)
     assert "## Project Context" not in result
+
+
+# --- Deep chain: primary/secondary people ---
+
+def test_deep_chain_primary_people(store):
+    """Person with leaf scope in clients is shown with full detail."""
+    eid = _seed_person(store, "Alice", scope="acme", role="Developer",
+                       clients="acme, proj-a")
+    store.add_observation(eid, "Works on frontend", scope="acme")
+    result = assemble_context(store, ["global", "acme", "proj-a"], tier=2)
+    assert "**Alice**" in result
+    assert "Works on frontend" in result
+
+
+def test_deep_chain_secondary_people(store):
+    """Person with parent-only in clients appears as brief team member."""
+    _seed_person(store, "Bob", scope="acme", role="Designer",
+                 clients="acme")
+    store.add_observation(store.find_entity("Bob"), "Loves CSS", scope="acme")
+    result = assemble_context(store, ["global", "acme", "proj-a"], tier=2)
+    assert "Bob" in result
+    assert "Other team members" in result
+    assert "Designer" in result
+    # Secondary people don't get observations
+    assert "Loves CSS" not in result
+
+
+def test_deep_chain_excludes_unrelated(store):
+    """Person with neither leaf nor parent in clients is excluded."""
+    _seed_person(store, "Carol", scope="other", role="PM",
+                 clients="other-org, other-proj")
+    result = assemble_context(store, ["global", "acme", "proj-a"], tier=2)
+    assert "Carol" not in result
+
+
+def test_deep_chain_clients_tokenized(store):
+    """Substring matching doesn't cause false positives."""
+    # "pro" should not match "proj-a" via substring
+    _seed_person(store, "Dan", scope="acme", role="Intern",
+                 clients="acme, pro")
+    result = assemble_context(store, ["global", "acme", "proj-a"], tier=2)
+    # Dan has "acme" (parent) but not "proj-a" (leaf) → secondary
+    assert "Other team members" in result
+    assert "Dan" in result
+    # Verify "pro" didn't match "proj-a" as primary
+    assert "**Dan**" not in result
+
+
+# --- Deep chain: log filtering ---
+
+def test_deep_chain_logs_leaf_only(store):
+    """Logs from sibling-scope entities are excluded for deep chains."""
+    # Entity with data only in sibling scope
+    sibling_eid = store.resolve_entity("Sibling Project", "project")
+    store.set_slot(sibling_eid, "name", "Sibling", scope="sibling-proj")
+    store.add_log(sibling_eid, "Sibling event")
+    # Entity with data in leaf scope
+    leaf_eid = store.resolve_entity("Leaf Project", "project")
+    store.set_slot(leaf_eid, "name", "Leaf", scope="proj-a")
+    store.add_log(leaf_eid, "Leaf event")
+    result = assemble_context(store, ["global", "acme", "proj-a"], tier=2)
+    assert "Leaf event" in result
+    assert "Sibling event" not in result
+
+
+def test_short_chain_logs_unchanged(store):
+    """For 2-level chain, all visible entity logs are shown."""
+    eid = store.resolve_entity("Project X", "project")
+    store.set_slot(eid, "name", "X", scope="acme")
+    store.add_log(eid, "Project X event")
+    result = assemble_context(store, ["global", "acme"], tier=2)
+    assert "Project X event" in result
+
+
+# --- Deep chain: parent context ---
+
+def test_parent_context_section(store):
+    """Parent entity info appears for 3+ chain."""
+    parent_eid = store.resolve_entity("acme", "agency")
+    store.set_slot(parent_eid, "name", "Acme Corp", scope="global")
+    store.add_observation(parent_eid, "Digital marketing agency", scope="global")
+    result = assemble_context(store, ["global", "acme", "proj-a"], tier=2)
+    assert "## Parent Context" in result
+    assert "Acme Corp" in result
+    assert "Digital marketing agency" in result
+
+
+def test_no_parent_context_short_chain(store):
+    """No parent context for 2-level chain."""
+    parent_eid = store.resolve_entity("acme", "agency")
+    store.set_slot(parent_eid, "name", "Acme Corp", scope="global")
+    result = assemble_context(store, ["global", "acme"], tier=2)
+    assert "## Parent Context" not in result

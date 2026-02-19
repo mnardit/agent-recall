@@ -158,6 +158,19 @@ class MemoryStore:
             ).fetchone()
         return row["id"] if row else None
 
+    def find_entity_icase(self, name: str, entity_type: str | None = None) -> int | None:
+        """Case-insensitive entity lookup. Returns entity ID or None."""
+        if entity_type:
+            row = self._conn.execute(
+                "SELECT id FROM entities WHERE LOWER(name) = LOWER(?) AND type = ?",
+                (name, entity_type),
+            ).fetchone()
+        else:
+            row = self._conn.execute(
+                "SELECT id FROM entities WHERE LOWER(name) = LOWER(?)", (name,),
+            ).fetchone()
+        return row["id"] if row else None
+
     def resolve_entity(self, name: str, entity_type: str) -> int:
         """Find or create an entity. Returns the entity ID.
 
@@ -592,6 +605,48 @@ class MemoryStore:
             ).fetchall():
                 found[r["id"]] = dict(r)
         return list(found.values())[:limit]
+
+    def rename_scope(self, old: str, new: str) -> dict:
+        """Migrate all data from one scope to another.
+
+        Updates scope on all current slots, active observations, and active
+        relations that have the old scope. Returns counts of affected rows.
+
+        Args:
+            old: The scope to rename from.
+            new: The scope to rename to.
+
+        Returns:
+            Dict with keys ``slots``, ``observations``, ``relations`` giving
+            the number of rows updated in each table.
+
+        Raises:
+            ValueError: If scope names are empty, equal, or ``old`` is "global".
+        """
+        if not old or not new:
+            raise ValueError("Scope names cannot be empty")
+        if old == new:
+            raise ValueError("Old and new scope must differ")
+        if old == "global":
+            raise ValueError("Cannot rename the global scope")
+        counts = {}
+        with self._conn:
+            cur = self._conn.execute(
+                "UPDATE slots SET scope = ? WHERE scope = ? AND valid_to IS NULL",
+                (new, old),
+            )
+            counts["slots"] = cur.rowcount
+            cur = self._conn.execute(
+                "UPDATE observations SET scope = ? WHERE scope = ? AND archived_at IS NULL",
+                (new, old),
+            )
+            counts["observations"] = cur.rowcount
+            cur = self._conn.execute(
+                "UPDATE relations SET scope = ? WHERE scope = ? AND status = 'active'",
+                (new, old),
+            )
+            counts["relations"] = cur.rowcount
+        return counts
 
     def __enter__(self) -> "MemoryStore":
         return self

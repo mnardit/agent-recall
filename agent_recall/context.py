@@ -22,6 +22,16 @@ def _is_topic(store: MemoryStore, scope: str) -> bool:
     return eid is not None
 
 
+def _find_parent_entity(store: MemoryStore, scope_name: str) -> int | None:
+    """Find entity matching a scope name (case-insensitive, typed then untyped)."""
+    for etype in ("agency", "client", "project", None):
+        eid = store.find_entity(scope_name, etype) if etype else store.find_entity(scope_name)
+        if eid:
+            return eid
+    # Case-insensitive fallback (scope "acme" matches entity "Acme")
+    return store.find_entity_icase(scope_name)
+
+
 def assemble_context(store: MemoryStore, chain: list[str], tier: int,
                      budget: int = 10000,
                      vault_projects_dir: Path | None = None,
@@ -56,23 +66,39 @@ def assemble_context(store: MemoryStore, chain: list[str], tier: int,
     # --- People ---
     chain_set = set(chain)
     non_global_chain = chain_set - {"global"}
+    deep_chain = len(chain) >= 3
     people = view.list_entities(entity_type="person")
     if people:
-        lines = []
+        primary_lines = []
+        secondary_lines = []
         for p in people:
             entity = view.get_entity(p["name"])
             if entity and entity["slots"]:
-                # Skip people with no connection to leaf scope
-                if tier in (1, 2) and non_global_chain and len(chain) > 2:
+                # Deep chains: classify into primary (leaf) vs secondary (parent)
+                if tier in (1, 2) and non_global_chain and deep_chain:
                     leaf = chain[-1]
+                    parent = chain[-2]
                     has_leaf_slots = bool(
                         store.get_slots(p["id"], scope_chain=[leaf]))
-                    if not has_leaf_slots:
-                        clients_val = entity["slots"].get("clients", "")
-                        if not clients_val.strip():
-                            continue
-                        if not any(c in clients_val for c in non_global_chain):
-                            continue
+                    clients_val = entity["slots"].get("clients", "")
+                    clients_set = (
+                        {c.strip().lower() for c in clients_val.split(",")}
+                        if clients_val.strip() else set()
+                    )
+                    is_primary = has_leaf_slots or leaf in clients_set
+                    is_secondary = (
+                        not is_primary and parent in clients_set
+                    )
+                    if not is_primary and not is_secondary:
+                        continue
+                    if is_secondary:
+                        role = entity["slots"].get("role", "")
+                        label = f"- {p['name']}"
+                        if role:
+                            label += f" ({role})"
+                        secondary_lines.append(label)
+                        continue
+                # Primary person (or short chain — full detail)
                 s = ", ".join(f"{k}: {v}" for k, v in entity["slots"].items())
                 line = f"- **{p['name']}** ({s})"
                 obs = store.get_observations(p["id"])
@@ -80,10 +106,15 @@ def assemble_context(store: MemoryStore, chain: list[str], tier: int,
                 if visible:
                     for o in visible[:5]:
                         line += f"\n  - {o}"
-                lines.append(line)
-        if lines:
+                primary_lines.append(line)
+        all_lines = primary_lines[:]
+        if secondary_lines:
+            all_lines.append("")
+            all_lines.append("**Other team members:**")
+            all_lines.extend(secondary_lines)
+        if all_lines:
             prio = PRIORITY_MUST
-            pending.append((prio, "People", "\n".join(lines)))
+            pending.append((prio, "People", "\n".join(all_lines)))
 
     # --- Current Tasks ---
     if tier >= 1 and vault_projects_dir and vault_projects_dir.exists():
@@ -109,6 +140,32 @@ def assemble_context(store: MemoryStore, chain: list[str], tier: int,
         if topic_lines:
             prio = PRIORITY_USEFUL if is_topic else PRIORITY_IMPORTANT
             pending.append((prio, "Topics", "\n".join(topic_lines)))
+
+    # --- Parent Context (for deep chains: describe the parent org/project) ---
+    if tier >= 1 and deep_chain:
+        parent_name = chain[-2]
+        parent_eid = _find_parent_entity(store, parent_name)
+        if parent_eid:
+            parent_slots = store.get_slots(parent_eid,
+                                           scope_chain=chain[:-1])
+            parent_obs = store.get_observations(parent_eid)
+            parent_chain_set = set(chain[:-1]) | {"global"}
+            visible_obs = [o["text"] for o in parent_obs
+                           if o.get("scope") in parent_chain_set]
+            p_lines = []
+            p_entity = store.get_entity(parent_eid)
+            if p_entity:
+                header = f"**{p_entity['name']}**"
+                if parent_slots:
+                    s = ", ".join(f"{k}: {v}"
+                                 for k, v in parent_slots.items())
+                    header += f" ({s})"
+                p_lines.append(header)
+            for o in visible_obs[:3]:
+                p_lines.append(f"- {o}")
+            if p_lines:
+                pending.append((PRIORITY_USEFUL, "Parent Context",
+                                "\n".join(p_lines)))
 
     # --- Project context (own scope observations, tier >= 1) ---
     if tier >= 1:
@@ -159,10 +216,14 @@ def assemble_context(store: MemoryStore, chain: list[str], tier: int,
 
     # --- Recent logs ---
     if tier >= 2:
-        all_entities = view.list_entities()
+        # Deep chains: only logs from entities with data in the leaf scope
+        if deep_chain:
+            log_entities = store.list_entities_in_scopes([chain[-1]])
+        else:
+            log_entities = view.list_entities()
         log_lines = []
-        for e in all_entities:
-            eid = store.find_entity(e["name"])
+        for e in log_entities:
+            eid = e.get("id") or store.find_entity(e["name"])
             if eid:
                 logs = store.get_logs(eid, limit=3)
                 for log in logs:

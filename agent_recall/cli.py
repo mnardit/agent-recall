@@ -228,6 +228,38 @@ def refresh(ctx, force):
         click.echo(f"  {icon} {slug}: {status}")
 
 
+# --- rename-scope ---
+
+@main.command("rename-scope")
+@click.argument("old_scope")
+@click.argument("new_scope")
+@click.option("--dry-run", is_flag=True, help="Show what would change without modifying data.")
+@click.pass_context
+def rename_scope(ctx, old_scope, new_scope, dry_run):
+    """Migrate all data from one scope to another."""
+    with _store(ctx.obj["config"]) as store:
+        if dry_run:
+            conn = store._conn
+            slots = conn.execute(
+                "SELECT COUNT(*) FROM slots WHERE scope = ? AND valid_to IS NULL",
+                (old_scope,)).fetchone()[0]
+            obs = conn.execute(
+                "SELECT COUNT(*) FROM observations WHERE scope = ? AND archived_at IS NULL",
+                (old_scope,)).fetchone()[0]
+            rels = conn.execute(
+                "SELECT COUNT(*) FROM relations WHERE scope = ? AND status = 'active'",
+                (old_scope,)).fetchone()[0]
+            total = slots + obs + rels
+            click.echo(f"Dry run: would rename {old_scope!r} -> {new_scope!r}: "
+                        f"{slots} slots, {obs} observations, {rels} relations ({total} total)")
+            return
+        counts = store.rename_scope(old_scope, new_scope)
+        total = sum(counts.values())
+        click.echo(f"Renamed scope {old_scope!r} -> {new_scope!r}: "
+                    f"{counts['slots']} slots, {counts['observations']} observations, "
+                    f"{counts['relations']} relations ({total} total)")
+
+
 # --- status ---
 
 @main.command()

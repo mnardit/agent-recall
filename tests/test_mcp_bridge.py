@@ -82,6 +82,7 @@ def test_add_observations_nonexistent(bridge):
         {"entityName": "Ghost", "contents": ["invisible"]}
     ])
     assert result["added"] == 0
+    assert any("Ghost" in b for b in result["blocked"])
 
 
 def test_delete_entities(bridge):
@@ -94,6 +95,7 @@ def test_delete_entities(bridge):
 def test_delete_entities_nonexistent(bridge):
     result = bridge.delete_entities(["Ghost"])
     assert result["deleted"] == 0
+    assert any("Ghost" in b for b in result["blocked"])
 
 
 def test_delete_relations(bridge):
@@ -121,6 +123,22 @@ def test_delete_observations(bridge):
     assert result["deleted"] == 1
     nodes = bridge.open_nodes(["Alice"])
     assert nodes[0]["observations"] == ["fact to keep"]
+
+
+def test_delete_observations_nonexistent(bridge):
+    result = bridge.delete_observations([
+        {"entityName": "Ghost", "observations": ["something"]}
+    ])
+    assert result["deleted"] == 0
+    assert any("Ghost" in b for b in result["blocked"])
+
+
+def test_delete_relations_nonexistent(bridge):
+    result = bridge.delete_relations([
+        {"from": "Ghost", "to": "Phantom", "relationType": "knows"}
+    ])
+    assert result["deleted"] == 0
+    assert any("Ghost" in b for b in result["blocked"])
 
 
 # --- Read operations ---
@@ -283,6 +301,76 @@ def test_parent_scope_allows_child_access(tmp_path):
     ])
     assert result["added"] == 1
     b_parent.close()
+
+
+# --- strict_scopes ---
+
+def test_strict_scopes_rejects_unknown(tmp_path):
+    """strict_scopes=True raises ValueError for scope not in config."""
+    config = MemoryConfig(
+        db_path=tmp_path / "test.db",
+        hierarchy={"acme": ["proj-a", "proj-b"]},
+    )
+    with pytest.raises(ValueError, match="not in known scopes"):
+        MCPBridge(tmp_path / "test.db", default_scope="typo-scope",
+                  scope_chain=["global", "acme", "typo-scope"],
+                  config=config, strict_scopes=True)
+
+
+def test_strict_scopes_accepts_known(tmp_path):
+    """strict_scopes=True succeeds for scope in config hierarchy."""
+    config = MemoryConfig(
+        db_path=tmp_path / "test.db",
+        hierarchy={"acme": ["proj-a", "proj-b"]},
+    )
+    b = MCPBridge(tmp_path / "test.db", default_scope="proj-a",
+                  scope_chain=["global", "acme", "proj-a"],
+                  config=config, strict_scopes=True)
+    b.close()
+
+
+def test_strict_scopes_accepts_parent(tmp_path):
+    """strict_scopes=True succeeds for parent scope in hierarchy."""
+    config = MemoryConfig(
+        db_path=tmp_path / "test.db",
+        hierarchy={"acme": ["proj-a"]},
+    )
+    b = MCPBridge(tmp_path / "test.db", default_scope="acme",
+                  scope_chain=["global", "acme"],
+                  config=config, strict_scopes=True)
+    b.close()
+
+
+def test_strict_scopes_off_by_default(tmp_path):
+    """Default strict_scopes=False allows unknown scope without error."""
+    config = MemoryConfig(
+        db_path=tmp_path / "test.db",
+        hierarchy={"acme": ["proj-a"]},
+    )
+    b = MCPBridge(tmp_path / "test.db", default_scope="unknown-scope",
+                  scope_chain=["global", "unknown-scope"],
+                  config=config)
+    b.close()
+
+
+def test_strict_scopes_no_config_ignored(tmp_path):
+    """strict_scopes=True without config does not raise."""
+    b = MCPBridge(tmp_path / "test.db", default_scope="anything",
+                  scope_chain=["global", "anything"],
+                  strict_scopes=True)
+    b.close()
+
+
+def test_strict_scopes_global_always_valid(tmp_path):
+    """Global scope is always valid even with strict_scopes."""
+    config = MemoryConfig(
+        db_path=tmp_path / "test.db",
+        hierarchy={"acme": ["proj-a"]},
+    )
+    b = MCPBridge(tmp_path / "test.db", default_scope="global",
+                  scope_chain=["global"],
+                  config=config, strict_scopes=True)
+    b.close()
 
 
 def test_scoped_delete_relations_blocked(tmp_path):

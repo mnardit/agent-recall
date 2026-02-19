@@ -312,3 +312,56 @@ def test_list_entities_with_observations_in_scope(store):
     names = {e["name"] for e in result}
     assert "Alice" in names
     assert "Bob" not in names
+
+
+# --- rename_scope ---
+
+def test_rename_scope_slots(store):
+    """rename_scope migrates current slots."""
+    eid = store.resolve_entity("Alice", "person")
+    store.set_slot(eid, "role", "dev", scope="old-name")
+    store.set_slot(eid, "email", "a@test.com", scope="old-name")
+    counts = store.rename_scope("old-name", "new-name")
+    assert counts["slots"] == 2
+    assert store.get_slot(eid, "role", scope_chain=["new-name"]) == "dev"
+    assert store.get_slot(eid, "role", scope_chain=["old-name"]) is None
+
+
+def test_rename_scope_observations(store):
+    """rename_scope migrates active observations."""
+    eid = store.resolve_entity("Alice", "person")
+    store.add_observation(eid, "Fact 1", scope="old-name")
+    store.add_observation(eid, "Fact 2", scope="old-name")
+    counts = store.rename_scope("old-name", "new-name")
+    assert counts["observations"] == 2
+    # Verify via entity scopes
+    scopes = store.get_entity_scopes(eid)
+    assert "new-name" in scopes
+    assert "old-name" not in scopes
+
+
+def test_rename_scope_relations(store):
+    """rename_scope migrates active relations."""
+    e1 = store.resolve_entity("Alice", "person")
+    e2 = store.resolve_entity("Acme", "client")
+    store.add_relation(e1, e2, "works_at", scope="old-name")
+    counts = store.rename_scope("old-name", "new-name")
+    assert counts["relations"] == 1
+
+
+def test_rename_scope_no_match(store):
+    """rename_scope with non-existent scope returns zero counts."""
+    counts = store.rename_scope("nonexistent", "new-name")
+    assert counts == {"slots": 0, "observations": 0, "relations": 0}
+
+
+def test_rename_scope_skips_archived(store):
+    """rename_scope does not touch archived slots/observations."""
+    eid = store.resolve_entity("Alice", "person")
+    store.set_slot(eid, "role", "dev", scope="old-name")
+    store.archive_slot(eid, "role", scope="old-name")
+    oid = store.add_observation(eid, "Archived fact", scope="old-name")
+    store.archive_observation(oid)
+    counts = store.rename_scope("old-name", "new-name")
+    assert counts["slots"] == 0
+    assert counts["observations"] == 0

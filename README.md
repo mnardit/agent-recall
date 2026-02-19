@@ -405,6 +405,7 @@ agent-recall history Alice role            # Bitemporal slot history
 agent-recall log Alice "Joined the team"   # Add observation
 agent-recall generate my-agent --force     # Generate AI briefing
 agent-recall refresh --force               # Refresh all briefings
+agent-recall rename-scope old-name new-name  # Migrate data between scopes
 ```
 
 ## Python API

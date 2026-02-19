@@ -4,9 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [0.2.0] - Unreleased
 
 ### Added
+- `strict_scopes` parameter on `MCPBridge` — validates that all scope chains contain only known scopes from config, rejects unknown scopes at write time
+- `MemoryConfig.known_scopes()` method — returns set of all scopes defined in hierarchy + tiers + agents
+- `store.rename_scope(old, new)` — migrates all slots, observations, and log entries from one scope to another. Also available as CLI command `agent-recall rename-scope <old> <new>`
+- Improved context assembly for deep scope chains — people split into primary (leaf-scoped) and secondary (inherited) sections
+- Parent context section in briefings for agents in deep scope chains (3+ levels)
+- Leaf-scoped log filtering — agents in deep scope chains see only their own scope's activity log, not the entire parent chain
+- Warning on unknown slug in `get_agent()` fallback — helps catch misconfigured agent names early
 - Auto-discovery of project files (CLAUDE.md, README.md, .cursorrules, .windsurfrules) for richer briefings — ON by default, disable with `auto_discover: false`
 - Per-agent model override via `agents.<slug>.model` in config
 - Per-agent template override via `agents.<slug>.template` (type name or inline text)
@@ -30,6 +37,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - CHANGELOG.md
 
 ### Fixed
+- MCP bridge now reports "Entity not found" in `blocked` when `add_observations`, `delete_observations`, `delete_entities`, or `delete_relations` reference a nonexistent entity — previously silently dropped
 - `list_entities_in_scopes()` now finds entities with observations-only (no slots) via UNION query — previously invisible
 - `assemble_context()` now includes "Project Context" section (observations for leaf-scope entities) at tier >= 1
 - `build_prompt()` crash on `{` in slug or raw context (both now escaped before `.format()`)

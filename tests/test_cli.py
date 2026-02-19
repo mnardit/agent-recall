@@ -128,3 +128,21 @@ def test_status(runner, db_path):
     assert result.exit_code == 0
     assert "Entities:" in result.output
     assert "person:" in result.output
+
+
+def test_rename_scope(runner, tmp_path):
+    """CLI rename-scope migrates data between scopes."""
+    path = str(tmp_path / "rename.db")
+    store = MemoryStore(path)
+    eid = store.resolve_entity("Alice", "person")
+    store.set_slot(eid, "role", "dev", scope="old-scope")
+    store.add_observation(eid, "Important fact", scope="old-scope")
+    store.close()
+
+    result = runner.invoke(main, ["--db", path, "rename-scope",
+                                  "old-scope", "new-scope"])
+    assert result.exit_code == 0
+    assert "old-scope" in result.output
+    assert "new-scope" in result.output
+    assert "1 slots" in result.output
+    assert "1 observations" in result.output

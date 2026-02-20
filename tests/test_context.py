@@ -283,3 +283,35 @@ def test_no_parent_context_short_chain(store):
     store.set_slot(parent_eid, "name", "Acme Corp", scope="global")
     result = assemble_context(store, ["global", "acme"], tier=2)
     assert "## Parent Context" not in result
+
+
+# --- Tier 1 short chain people filtering ---
+
+def test_tier1_short_chain_excludes_global_only(store):
+    """Tier 1 short chain: global-only people are excluded."""
+    _seed_person(store, "Alice", scope="global", role="Friend")
+    result = assemble_context(store, ["global", "my-service"], tier=1)
+    assert "Alice" not in result
+
+
+def test_tier1_short_chain_includes_leaf_scoped(store):
+    """Tier 1 short chain: people with leaf-scope data are included."""
+    eid = _seed_person(store, "Bob", scope="global", role="Admin")
+    store.set_slot(eid, "access", "full", scope="my-service")
+    result = assemble_context(store, ["global", "my-service"], tier=1)
+    assert "Bob" in result
+
+
+def test_tier1_short_chain_includes_leaf_observation(store):
+    """Tier 1 short chain: people with leaf-scope observation are included."""
+    eid = _seed_person(store, "Carol", scope="global", role="User")
+    store.add_observation(eid, "Uses the dashboard daily", scope="my-service")
+    result = assemble_context(store, ["global", "my-service"], tier=1)
+    assert "Carol" in result
+
+
+def test_tier2_short_chain_keeps_all(store):
+    """Tier 2 short chain: all people shown (no filtering)."""
+    _seed_person(store, "Dave", scope="global", role="CEO")
+    result = assemble_context(store, ["global", "acme"], tier=2)
+    assert "Dave" in result

@@ -1,22 +1,28 @@
 You are generating a context briefing for an AI agent. The briefing will be injected into the agent's system prompt at startup.
 
-IMPORTANT: Output ONLY the briefing content. No meta-commentary, no preamble. Use markdown formatting. Maximum {budget} characters.
+IMPORTANT: Output ONLY the briefing content. No meta-commentary, no preamble, no changelogs, no "key updates" summaries. This is a fresh generation — do NOT reference previous versions. Use markdown formatting. Maximum {budget} characters.
 
 Agent: "{slug}" — system utility/service agent.
 
-Raw data:
-{raw_context}
+INSTRUCTIONS (read before processing raw data):
 
-Create a minimal briefing:
+Generate a minimal, technical briefing. System agents need precise operational details, not lengthy context.
 
 ## Role
-What this agent does in the system.
+What this agent does — one paragraph.
 
 ## People
-Only people who interact with this service.
+Only people who directly interact with or maintain this service.
 
 ## Context
-System-level context this agent needs.
+Technical details: service name, how to restart, tests, DB, APIs, key config. Extract from CLAUDE.md in Project Files.
 
-Keep it very short — system agents need minimal people context.
-Language: match the raw data language.
+RULES:
+- Keep it short and technical.
+- Output only information from the raw data.
+- Language: match the raw data.
+
+---
+
+Raw data:
+{raw_context}

@@ -74,6 +74,17 @@ def assemble_context(store: MemoryStore, chain: list[str], tier: int,
         for p in people:
             entity = view.get_entity(p["name"])
             if entity and entity["slots"]:
+                # Tier 1 short chains: only people with leaf-scope data
+                if tier == 1 and non_global_chain and not deep_chain:
+                    leaf = chain[-1]
+                    has_leaf_slots = bool(
+                        store.get_slots(p["id"], scope_chain=[leaf]))
+                    has_leaf_obs = any(
+                        o.get("scope") == leaf
+                        for o in store.get_observations(p["id"]))
+                    if not has_leaf_slots and not has_leaf_obs:
+                        continue
+
                 # Deep chains: classify into primary (leaf) vs secondary (parent)
                 if tier in (1, 2) and non_global_chain and deep_chain:
                     leaf = chain[-1]

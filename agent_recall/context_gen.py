@@ -71,7 +71,9 @@ class LLMResult:
 _PROMPT_HEADER = (
     "You are generating a context briefing for an AI agent. "
     "The briefing will be injected into the agent's system prompt at startup.\n\n"
-    "IMPORTANT: Output ONLY the briefing content. No meta-commentary, no preamble. "
+    "IMPORTANT: Output ONLY the briefing content. No meta-commentary, no preamble, "
+    "no changelogs, no \"key updates\" summaries. "
+    "This is a fresh generation — do NOT reference previous versions. "
     "Use markdown formatting. Maximum {budget} characters.\n\n"
 )
 
@@ -79,108 +81,157 @@ BUILTIN_TEMPLATES: dict[str, str] = {
     "client": (
         _PROMPT_HEADER
         + "Agent: \"{slug}\" — manages a client project.\n\n"
-        "Raw data from knowledge base:\n{raw_context}\n\n"
-        "Create a structured briefing:\n\n"
+        "INSTRUCTIONS (read these BEFORE processing the raw data):\n\n"
+        "Generate a briefing with these sections:\n\n"
         "## Key People\n"
-        "For each person: name, role, contact method, what to remember about them.\n"
-        "Only people who actually work with THIS client.\n\n"
+        "Include people with detailed entries. For each: name, role, contact, key facts.\n"
+        "From \"Other team members\", include ONLY those listed in CLAUDE.md People section. "
+        "Skip unrelated team members.\n"
+        "Use role descriptions from \"## Role Descriptions\" section "
+        "(e.g. \"lead developer\", \"backup developer\") over generic slot data.\n\n"
         "## Current Tasks\n"
-        "Prioritize: urgent > in progress > can wait.\n"
-        "Group by area if applicable.\n\n"
+        "Prioritize: urgent > in progress > can wait.\n\n"
+        "## Constraints & Rules\n"
+        "Copy from \"## Agent Constraints\" section in raw data. "
+        "If that section is absent, write \"None specified.\" Do NOT invent constraints.\n\n"
         "## Context\n"
-        "Recent events, decisions, agreements. What the agent must know.\n\n"
+        "Recent events, decisions, agreements.\n\n"
         "## Relations\n"
         "Key dependencies between people and projects.\n\n"
-        "DO NOT include: raw slot data, entity IDs, scope metadata, "
-        "people unrelated to this client, completed tasks.\n"
-        "Language: match the language of the raw data."
+        "RULES:\n"
+        "- Output ONLY information from the raw data below. Do NOT hallucinate.\n"
+        "- CLAUDE.md (in \"## Project Files\" at the end) has operational rules — "
+        "extract constraints and role descriptions from it.\n"
+        "- Exclude: raw slot data, entity IDs, scope metadata, completed tasks.\n"
+        "- Language: match the raw data.\n\n"
+        "---\n\n"
+        "Raw data from knowledge base:\n{raw_context}"
     ),
     "agency": (
         _PROMPT_HEADER
-        + "Agent: \"{slug}\" — manages an agency/organization.\n"
-        "This agent oversees multiple sub-clients and coordinates team work.\n\n"
-        "Raw data:\n{raw_context}\n\n"
-        "Create a structured briefing:\n\n"
+        + "Agent: \"{slug}\" — manages an agency/organization with multiple sub-clients.\n\n"
+        "INSTRUCTIONS (read before processing raw data):\n\n"
+        "Generate a briefing with these sections:\n\n"
         "## Team\n"
-        "Team members: roles, responsibilities, how to reach them.\n\n"
+        "All team members with: name, role, contact method, timezone, key traits.\n"
+        "Use role descriptions from \"## Role Descriptions\" if available.\n"
+        "Format as a table if 5+ people.\n\n"
         "## Clients & Projects\n"
-        "Active clients with current status and priorities.\n\n"
+        "Active clients grouped by priority. For each: status, current focus, key contact.\n"
+        "Prioritize by urgency and business importance.\n\n"
         "## Current Tasks\n"
-        "Cross-client tasks and agency-level priorities.\n\n"
+        "Cross-client and agency-level tasks. Group by area.\n\n"
+        "## Constraints & Rules\n"
+        "Copy from \"## Agent Constraints\" section if present. "
+        "If absent, omit this section entirely.\n\n"
         "## Context\n"
-        "Recent events, decisions, open questions.\n\n"
-        "Language: match the raw data language."
+        "Recent events, decisions, open questions that affect the agency.\n\n"
+        "RULES:\n"
+        "- Output only information from the raw data. Do not add external knowledge.\n"
+        "- Language: match the raw data.\n\n"
+        "---\n\n"
+        "Raw data:\n{raw_context}"
     ),
     "personal": (
         _PROMPT_HEADER
         + "Agent: \"{slug}\" — personal/side project.\n\n"
-        "Raw data:\n{raw_context}\n\n"
-        "Create a concise briefing:\n\n"
+        "INSTRUCTIONS (read before processing raw data):\n\n"
+        "Generate a concise briefing. Personal projects need less context than "
+        "client work — keep it focused.\n\n"
         "## People\n"
-        "Who's involved and their roles.\n\n"
+        "Who's involved and their roles. Include all people from the data.\n\n"
         "## Tasks\n"
-        "Current tasks and priorities.\n\n"
+        "Current tasks and priorities. If no tasks, say so.\n\n"
+        "## Constraints & Rules\n"
+        "Copy from \"## Agent Constraints\" section if present. "
+        "If absent, omit this section entirely.\n\n"
         "## Context\n"
-        "What the agent needs to know to be useful.\n\n"
-        "Keep it brief — personal projects need less context than client work.\n"
-        "Language: match the raw data language."
+        "What the agent needs to know. Include project-specific details from "
+        "CLAUDE.md in Project Files.\n\n"
+        "RULES:\n"
+        "- Output only information from the raw data.\n"
+        "- Language: match the raw data.\n\n"
+        "---\n\n"
+        "Raw data:\n{raw_context}"
     ),
     "topic": (
         _PROMPT_HEADER
         + "Agent: \"{slug}\" — focused topic/sub-session within a larger project.\n"
         "Topics are temporary workstreams that need sharp focus.\n\n"
-        "Raw data:\n{raw_context}\n\n"
-        "Create a focused briefing:\n\n"
+        "INSTRUCTIONS (read before processing raw data):\n\n"
+        "Generate a focused briefing — only what's directly relevant to this topic.\n\n"
         "## Goal\n"
-        "What this topic is about and what needs to be done.\n\n"
+        "What this topic is about and the current objective.\n\n"
         "## Tasks\n"
-        "Current tasks, ordered by priority.\n\n"
+        "Current tasks ordered by priority. Include status if known.\n\n"
         "## People\n"
-        "Only people directly relevant to this topic.\n\n"
+        "People working on this topic. Include role descriptions from "
+        "\"## Role Descriptions\" if available.\n\n"
+        "## Constraints & Rules\n"
+        "Copy from \"## Agent Constraints\" section if present. "
+        "If absent, omit this section entirely.\n\n"
         "## Context\n"
-        "Parent project context relevant to this topic.\n\n"
-        "Be very focused — topics are narrow. Skip anything not directly relevant.\n"
-        "Language: match the raw data language."
+        "Parent project context relevant to this topic. Recent decisions, "
+        "technical details, key files.\n\n"
+        "RULES:\n"
+        "- Stay focused on this topic. Skip unrelated parent project details.\n"
+        "- Output only information from the raw data.\n"
+        "- Language: match the raw data.\n\n"
+        "---\n\n"
+        "Raw data:\n{raw_context}"
     ),
     "system": (
         _PROMPT_HEADER
         + "Agent: \"{slug}\" — system utility/service agent.\n\n"
-        "Raw data:\n{raw_context}\n\n"
-        "Create a minimal briefing:\n\n"
+        "INSTRUCTIONS (read before processing raw data):\n\n"
+        "Generate a minimal, technical briefing. System agents need precise "
+        "operational details, not lengthy context.\n\n"
         "## Role\n"
-        "What this agent does in the system.\n\n"
+        "What this agent does — one paragraph.\n\n"
         "## People\n"
-        "Only people who interact with this service.\n\n"
+        "Only people who directly interact with or maintain this service.\n\n"
         "## Context\n"
-        "System-level context this agent needs.\n\n"
-        "Keep it very short — system agents need minimal people context.\n"
-        "Language: match the raw data language."
+        "Technical details: service name, how to restart, tests, DB, APIs, "
+        "key config. Extract from CLAUDE.md in Project Files.\n\n"
+        "RULES:\n"
+        "- Keep it short and technical.\n"
+        "- Output only information from the raw data.\n"
+        "- Language: match the raw data.\n\n"
+        "---\n\n"
+        "Raw data:\n{raw_context}"
     ),
     "orchestrator": (
         _PROMPT_HEADER
         + "Agent: \"{slug}\" — orchestrator/meta-agent managing all other agents.\n"
-        "This is the central coordinator of a multi-agent system.\n\n"
-        "Raw data from knowledge base:\n{raw_context}\n\n"
-        "Create a high-level briefing for the orchestrator:\n\n"
+        "Central coordinator of a multi-agent system.\n\n"
+        "INSTRUCTIONS (read before processing raw data):\n\n"
+        "Generate the COMPLETE briefing from scratch. This is a fresh generation, "
+        "not an update. Do NOT reference any previous version or describe changes.\n\n"
+        "Focus on what matters across the whole system, not details "
+        "of individual projects.\n\n"
         "## Key People\n"
-        "PRIORITIZE by operational importance:\n"
-        "1. Owner — always first, with timezone and contacts\n"
-        "2. Key business contacts\n"
-        "3. Others — ONLY if they directly affect current active tasks\n"
-        "Do NOT list people with no operational role.\n\n"
+        "Prioritize by operational importance:\n"
+        "1. Owner — first, with timezone and contacts\n"
+        "2. Key business contacts who affect multiple projects\n"
+        "3. Skip people with no current operational role.\n\n"
         "## Agents & Projects\n"
-        "Overview of active agents/projects grouped by category. "
-        "Current status and priorities.\n\n"
+        "Overview grouped by category (clients, personal, system, topics). "
+        "For each: current status and top priority.\n\n"
         "## Active Priorities\n"
-        "Cross-project priorities, blockers, deadlines. What needs attention NOW.\n"
-        "Group by urgency: critical > in progress > backlog.\n\n"
+        "Cross-project priorities, blockers, deadlines.\n"
+        "Group: urgent > in progress > backlog.\n\n"
         "## Context\n"
         "Recent system-wide events, decisions, open questions.\n\n"
         "## Monitoring Points\n"
-        "Key things to watch: services, timers, sessions, resources.\n\n"
-        "The orchestrator needs a BIRD'S EYE VIEW — don't go deep into any single "
-        "project, focus on what matters across the whole system.\n"
-        "Language: match the raw data language."
+        "Services, timers, sessions, resources to watch.\n\n"
+        "RULES:\n"
+        "- Generate the FULL briefing with all sections populated.\n"
+        "- Bird's eye view only. Do not go deep into any single project.\n"
+        "- Output only information from the raw data.\n"
+        "- Do NOT output changelogs, diffs, or summaries of what changed.\n"
+        "- Language: match the raw data.\n\n"
+        "---\n\n"
+        "Raw data from knowledge base:\n{raw_context}"
     ),
 }
 
@@ -705,6 +756,44 @@ def _assemble_topic_context(store: MemoryStore, slug: str, chain: list[str],
 
 # --- Context File Loading ---
 
+def _extract_claude_md_sections(paths: list[Path]) -> dict[str, str]:
+    """Extract key sections from CLAUDE.md files for prominent placement in raw data.
+
+    Returns dict with optional keys: 'constraints', 'people_roles'.
+    """
+    result: dict[str, str] = {}
+    for path in paths:
+        if path.name != "CLAUDE.md":
+            continue
+        resolved = path.resolve()
+        if not resolved.is_file():
+            continue
+        try:
+            content = resolved.read_text()
+        except OSError:
+            continue
+
+        # Extract ## Constraints or ## Rules sections
+        import re
+        for header in ("Constraints", "Rules"):
+            pattern = rf"^## {header}\s*\n(.*?)(?=\n## |\Z)"
+            match = re.search(pattern, content, re.MULTILINE | re.DOTALL)
+            if match:
+                text = match.group(1).strip()
+                if text:
+                    result["constraints"] = result.get("constraints", "") + text + "\n"
+
+        # Extract ## People section for role descriptions
+        people_match = re.search(
+            r"^## People\s*\n(.*?)(?=\n## |\Z)", content, re.MULTILINE | re.DOTALL
+        )
+        if people_match:
+            result["people_roles"] = people_match.group(1).strip()
+
+        break  # Only process first CLAUDE.md
+    return result
+
+
 def _load_context_files(paths: list[Path], budget: int) -> str:
     """Read files and concatenate, truncating to budget.
 
@@ -828,6 +917,19 @@ def generate_briefing(
         file_content = _load_context_files(ctx_files, ctx_budget)
         if file_content:
             raw = (raw or "") + f"\n\n## Project Files\n{file_content}"
+
+        # Extract key CLAUDE.md sections and add as top-level for prominence
+        extracted = _extract_claude_md_sections(ctx_files)
+        if extracted.get("constraints"):
+            raw = (raw or "") + (
+                f"\n\n## Agent Constraints (from CLAUDE.md)\n"
+                f"{extracted['constraints']}"
+            )
+        if extracted.get("people_roles"):
+            raw = (raw or "") + (
+                f"\n\n## Role Descriptions (from CLAUDE.md)\n"
+                f"{extracted['people_roles']}"
+            )
 
     if not raw or len(raw.strip()) < 50:
         log.info("No meaningful raw context for %s (%d chars)", slug, len(raw or ""))

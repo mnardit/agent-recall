@@ -452,7 +452,7 @@ pip install -e ".[dev]"
 pytest
 ```
 
-268 tests covering store, config, hierarchy, context assembly, AI briefings, vault generation, hooks, dedup, and MCP bridge.
+296 tests covering store, config, hierarchy, context assembly, AI briefings, vault generation, hooks, dedup, and MCP bridge.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 

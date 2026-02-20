@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [0.2.0] - Unreleased
+## [0.2.0] - 2026-02-20
 
 ### Added
 - `strict_scopes` parameter on `MCPBridge` — validates that all scope chains contain only known scopes from config, rejects unknown scopes at write time

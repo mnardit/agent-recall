@@ -6,7 +6,7 @@ from pathlib import Path
 from agent_recall.store import MemoryStore
 from agent_recall.config import MemoryConfig
 from agent_recall.context_gen import (
-    BUILTIN_TEMPLATES, AGENT_TYPES, DISCOVERABLE_FILES,
+    BUILTIN_TEMPLATES,
     load_template, build_prompt,
     is_cache_fresh, get_cache_path, read_cache,
     invalidate_cache, clear_stale_marker, scope_to_agents,
@@ -48,7 +48,7 @@ def _fake_llm(prompt: str, model: str = "opus", timeout: int = 300) -> str:
 # --- Template loading ---
 
 def test_builtin_templates_exist():
-    for agent_type in AGENT_TYPES:
+    for agent_type in ("client", "agency", "personal", "topic", "system", "orchestrator"):
         assert agent_type in BUILTIN_TEMPLATES
 
 

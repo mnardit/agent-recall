@@ -23,7 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - `delete_relations()` validates input dict structure (was raising KeyError on malformed input)
 - CLI `get` shows error message on missing slot (was silent exit code 1)
 - CLI `rename-scope --dry-run` uses public `store.count_scope()` (was accessing private `_conn`)
-- README test count: 296 → 300
+- README test count updated to match actual count
 - Module docstrings clarify `context.py` (raw assembly) vs `context_gen.py` (LLM briefings)
 
 ## [0.2.0] - 2026-02-20

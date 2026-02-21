@@ -9,13 +9,15 @@ For raw data assembly (no LLM) see context.py.
 import json as _json
 import logging
 import os
+import re
 import subprocess
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from agent_recall.config import MemoryConfig, AgentConfig, load_config
+from agent_recall.config import MemoryConfig, load_config
 from agent_recall.context import assemble_context
 from agent_recall.store import MemoryStore
 
@@ -27,8 +29,6 @@ DEFAULT_RAW_BUDGET = 50000     # generous budget for raw input
 DEFAULT_OUTPUT_BUDGET = 8000   # target output size
 DEFAULT_MODEL = "opus"
 DEFAULT_TIMEOUT = 300
-
-AGENT_TYPES = ("client", "agency", "personal", "topic", "system", "orchestrator")
 
 # Type for pluggable LLM invocation: (prompt, model, timeout) -> str | None | LLMResult
 LLMCaller = Callable[[str, str, int], "str | None | LLMResult"]
@@ -454,7 +454,6 @@ def get_agent_status(slug: str, config: MemoryConfig | None = None) -> dict:
     """
     if not slug or not slug.strip():
         raise ValueError("Agent slug cannot be empty")
-    from datetime import datetime, timezone
 
     config = config or load_config()
     cache_dir = config.cache_dir
@@ -776,8 +775,6 @@ def _extract_claude_md_sections(paths: list[Path]) -> dict[str, str]:
         except OSError:
             continue
 
-        # Extract ## Constraints or ## Rules sections
-        import re  # noqa: E402 — deferred for optional code path
         for header in ("Constraints", "Rules"):
             pattern = rf"^## {header}\s*\n(.*?)(?=\n## |\Z)"
             match = re.search(pattern, content, re.MULTILINE | re.DOTALL)
@@ -1017,7 +1014,7 @@ def generate_all(
     """
     config = config or load_config()
     slugs = agent_slugs or config.all_agents()
-    dir_map = project_dir_map or {}
+    project_dir_map = project_dir_map or {}
     results: dict[str, str] = {}
 
     with MemoryStore(config.db_path) as store:
@@ -1028,21 +1025,17 @@ def generate_all(
             if not config.get_agent_enabled(slug):
                 results[slug] = "skip:disabled"
                 continue
-            agent = config.get_agent(slug)
-            if agent.tier == 0:
+            if config.get_agent(slug).tier == 0:
                 results[slug] = "skip:tier0"
                 continue
 
             try:
-                path_result = generate_briefing(
+                path = generate_briefing(
                     slug, config=config, force=force,
                     llm_caller=llm_caller, store=store,
-                    project_dir=dir_map.get(slug),
+                    project_dir=project_dir_map.get(slug),
                 )
-                if path_result:
-                    results[slug] = "ok"
-                else:
-                    results[slug] = "skip:no_context"
+                results[slug] = "ok" if path else "skip:no_context"
             except Exception as e:
                 log.error("Failed to generate for %s: %s", slug, e)
                 results[slug] = f"error:{e}"

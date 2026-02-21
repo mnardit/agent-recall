@@ -549,14 +549,6 @@ class MemoryStore:
         ).fetchall()
         return [dict(r) for r in outgoing], [dict(r) for r in incoming]
 
-    def commit(self) -> None:
-        """Explicit commit for multi-step operations."""
-        self._conn.commit()
-
-    def rollback(self) -> None:
-        """Explicit rollback for error recovery in multi-step operations."""
-        self._conn.rollback()
-
     def transaction(self):
         """Context manager for atomic multi-step operations.
 
@@ -702,11 +694,11 @@ class MemoryStore:
         Returns:
             Sorted list of orphaned scope strings.
         """
-        db_scopes: set[str] = set()
-        for row in self._conn.execute("SELECT DISTINCT scope FROM slots"):
-            db_scopes.add(row[0])
-        for row in self._conn.execute("SELECT DISTINCT scope FROM observations"):
-            db_scopes.add(row[0])
+        db_scopes = {
+            row[0]
+            for table in ("slots", "observations")
+            for row in self._conn.execute(f"SELECT DISTINCT scope FROM {table}")
+        }
         return sorted(db_scopes - valid_scopes)
 
     def find_duplicate_slots(self, entity_type: str | None = None) -> list[dict]:
@@ -727,18 +719,15 @@ class MemoryStore:
             type_filter = "AND e.type = ?"
             params.append(entity_type)
         rows = self._conn.execute(
-            f"SELECT s.entity_id, e.name, s.key, s.scope, COUNT(*) as cnt "
+            f"SELECT s.entity_id as entity_id, e.name as entity_name, "
+            f"s.key as key, s.scope as scope, COUNT(*) as count "
             f"FROM slots s JOIN entities e ON s.entity_id = e.id "
             f"WHERE s.valid_to IS NULL {type_filter} "
             f"GROUP BY s.entity_id, s.key, s.scope "
-            f"HAVING cnt > 1 ORDER BY cnt DESC",
+            f"HAVING count > 1 ORDER BY count DESC",
             params,
         ).fetchall()
-        return [
-            {"entity_id": r[0], "entity_name": r[1], "key": r[2],
-             "scope": r[3], "count": r[4]}
-            for r in rows
-        ]
+        return [dict(r) for r in rows]
 
     def find_thin_entities(
         self, exclude_types: set[str] | None = None,
@@ -757,9 +746,9 @@ class MemoryStore:
         placeholders = ",".join("?" * len(exclude)) if exclude else ""
         type_filter = f"AND e.type NOT IN ({placeholders})" if exclude else ""
         rows = self._conn.execute(
-            f"SELECT e.id, e.name, e.type, "
-            f"  COALESCE(s.cnt, 0) as slot_cnt, "
-            f"  COALESCE(o.cnt, 0) as obs_cnt "
+            f"SELECT e.id as entity_id, e.name as name, e.type as type, "
+            f"  COALESCE(s.cnt, 0) as slots, "
+            f"  COALESCE(o.cnt, 0) as observations "
             f"FROM entities e "
             f"LEFT JOIN (SELECT entity_id, COUNT(*) as cnt FROM slots "
             f"  WHERE valid_to IS NULL GROUP BY entity_id) s ON e.id = s.entity_id "
@@ -770,11 +759,7 @@ class MemoryStore:
             f"ORDER BY e.type, e.name",
             list(exclude),
         ).fetchall()
-        return [
-            {"entity_id": r[0], "name": r[1], "type": r[2],
-             "slots": r[3], "observations": r[4]}
-            for r in rows
-        ]
+        return [dict(r) for r in rows]
 
     def check_integrity(
         self, valid_scopes: set[str] | None = None,

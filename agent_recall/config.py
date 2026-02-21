@@ -9,10 +9,6 @@ from typing import Any
 logger = logging.getLogger("agent_recall")
 
 
-DEFAULT_CONFIG_PATHS = [
-    Path.cwd() / "memory.yaml",
-    Path.home() / ".agent-recall" / "memory.yaml",
-]
 DEFAULT_DB_PATH = Path.home() / ".agent-recall" / "frames.db"
 DEFAULT_CACHE_DIR = Path.home() / ".agent-recall" / "context_cache"
 
@@ -21,24 +17,14 @@ ENV_DB_PATH = "AGENT_RECALL_DB_PATH"
 ENV_CACHE_DIR = "AGENT_RECALL_CACHE_DIR"
 
 
-def _resolve_db_path(config_value: Path | None = None) -> Path:
-    """Resolve DB path: explicit config > env var > package default."""
+def _resolve_path(config_value: Path | None, env_var: str, default: Path) -> Path:
+    """Resolve path: explicit config > env var > package default."""
     if config_value is not None:
         return config_value
-    env = os.environ.get(ENV_DB_PATH)
+    env = os.environ.get(env_var)
     if env:
         return Path(env).expanduser()
-    return DEFAULT_DB_PATH
-
-
-def _resolve_cache_dir(config_value: Path | None = None) -> Path:
-    """Resolve cache dir: explicit config > env var > package default."""
-    if config_value is not None:
-        return config_value
-    env = os.environ.get(ENV_CACHE_DIR)
-    if env:
-        return Path(env).expanduser()
-    return DEFAULT_CACHE_DIR
+    return default
 
 
 @dataclass
@@ -213,8 +199,8 @@ def load_config(path: Path | str | None = None) -> MemoryConfig:
 
     # No config file — env vars still apply
     return MemoryConfig(
-        db_path=_resolve_db_path(),
-        cache_dir=_resolve_cache_dir(),
+        db_path=_resolve_path(None, ENV_DB_PATH, DEFAULT_DB_PATH),
+        cache_dir=_resolve_path(None, ENV_CACHE_DIR, DEFAULT_CACHE_DIR),
     )
 
 
@@ -277,8 +263,8 @@ def _parse_config(config_path: Path) -> MemoryConfig:
     yaml_cache = _expand_path(data["cache_dir"]) if "cache_dir" in data else None
 
     return MemoryConfig(
-        db_path=_resolve_db_path(yaml_db),
-        cache_dir=_resolve_cache_dir(yaml_cache),
+        db_path=_resolve_path(yaml_db, ENV_DB_PATH, DEFAULT_DB_PATH),
+        cache_dir=_resolve_path(yaml_cache, ENV_CACHE_DIR, DEFAULT_CACHE_DIR),
         hierarchy=hierarchy,
         tiers=tiers,
         agent_types=agent_types,

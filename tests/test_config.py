@@ -1,6 +1,6 @@
 import pytest
 from pathlib import Path
-from agent_recall.config import MemoryConfig, load_config, AgentConfig
+from agent_recall.config import MemoryConfig, load_config
 
 
 YAML_CONTENT = """\

@@ -1,6 +1,6 @@
 """agent-recall — Persistent memory with scope hierarchy for AI agents."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from agent_recall.store import MemoryStore
 from agent_recall.hierarchy import ScopedView

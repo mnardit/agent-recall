@@ -1,8 +1,8 @@
-"""Layered Context Assembly — build additionalContext string from frames.db.
+"""Raw Context Assembly — structured data extraction from frames.db (no LLM).
 
-Sections have explicit priorities (must-have -> nice-to-have).
-Priorities differ for project agents vs topic agents.
-Oversized sections are truncated by entries, never silently dropped.
+Builds a markdown document from database entities, slots, observations, and logs.
+Sections have explicit priorities (must-have -> nice-to-have) and are budget-aware.
+This is the data layer; for LLM-based summarization see context_gen.py.
 """
 from pathlib import Path
 

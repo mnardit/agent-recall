@@ -166,7 +166,7 @@ class MemoryConfig:
 
 def _expand_path(raw: str) -> Path:
     """Expand ~ and env vars in path strings."""
-    import os
+    import os  # noqa: E402 — deferred to avoid module-level side effects
     return Path(os.path.expandvars(raw)).expanduser()
 
 

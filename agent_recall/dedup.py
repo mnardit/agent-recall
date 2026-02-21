@@ -96,7 +96,7 @@ def merge_entities(store: MemoryStore, keep_id: int, remove_id: int) -> None:
 
     The entire merge is atomic — on any failure, all changes are rolled back.
     """
-    try:
+    with store.transaction():
         # Move slots (skip duplicates)
         existing_keys = {(s["key"], s["scope"]) for s in store.get_raw_slots(keep_id)}
         for slot in store.get_raw_slots(remove_id):
@@ -131,7 +131,3 @@ def merge_entities(store: MemoryStore, keep_id: int, remove_id: int) -> None:
 
         # Delete the old entity (cascades via FK)
         store.delete_entity(remove_id)
-        store.commit()
-    except Exception:
-        store.rollback()
-        raise

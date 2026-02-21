@@ -74,6 +74,7 @@ def get_slot(ctx, entity, key):
             sys.exit(1)
         val = store.get_slot(eid, key)
         if val is None:
+            click.echo(f"Slot '{key}' not found on entity '{entity}'", err=True)
             sys.exit(1)
         click.echo(val)
 
@@ -239,19 +240,11 @@ def rename_scope(ctx, old_scope, new_scope, dry_run):
     """Migrate all data from one scope to another."""
     with _store(ctx.obj["config"]) as store:
         if dry_run:
-            conn = store._conn
-            slots = conn.execute(
-                "SELECT COUNT(*) FROM slots WHERE scope = ? AND valid_to IS NULL",
-                (old_scope,)).fetchone()[0]
-            obs = conn.execute(
-                "SELECT COUNT(*) FROM observations WHERE scope = ? AND archived_at IS NULL",
-                (old_scope,)).fetchone()[0]
-            rels = conn.execute(
-                "SELECT COUNT(*) FROM relations WHERE scope = ? AND status = 'active'",
-                (old_scope,)).fetchone()[0]
-            total = slots + obs + rels
+            counts = store.count_scope(old_scope)
+            total = sum(counts.values())
             click.echo(f"Dry run: would rename {old_scope!r} -> {new_scope!r}: "
-                        f"{slots} slots, {obs} observations, {rels} relations ({total} total)")
+                        f"{counts['slots']} slots, {counts['observations']} observations, "
+                        f"{counts['relations']} relations ({total} total)")
             return
         counts = store.rename_scope(old_scope, new_scope)
         total = sum(counts.values())

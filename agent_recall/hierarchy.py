@@ -27,6 +27,11 @@ class ScopedView:
         return self._store.get_slot(entity_id, key, scope_chain=self._chain)
 
     def get_entity(self, name: str) -> dict | None:
+        """Get entity with scoped slots and observations.
+
+        Returns dict with keys: id, name, type, created_at, slots, observations.
+        Observations are filtered to the scope chain.
+        """
         entity_id = self._store.find_entity(name)
         if entity_id is None:
             return None
@@ -34,6 +39,9 @@ class ScopedView:
         if entity is None:
             return None
         entity["slots"] = self._store.get_slots(entity_id, scope_chain=self._chain)
+        all_obs = self._store.get_observations(entity_id)
+        chain_set = set(self._chain)
+        entity["observations"] = [o for o in all_obs if o.get("scope") in chain_set]
         return entity
 
     def list_entities(self, entity_type: str | None = None) -> list[dict]:
@@ -44,7 +52,10 @@ class ScopedView:
         entity_id = self._store.resolve_entity(entity_name, entity_type)
         self._store.set_slot(entity_id, key, value, scope=self.local_scope, **kwargs)
 
-    def add_log(self, entity_name: str, text: str, **kwargs) -> None:
+    def add_log(self, entity_name: str, text: str, **kwargs) -> bool:
+        """Add a log entry. Returns True if entity exists and log was added."""
         entity_id = self._store.find_entity(entity_name)
         if entity_id is not None:
             self._store.add_log(entity_id, text, **kwargs)
+            return True
+        return False

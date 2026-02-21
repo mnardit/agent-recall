@@ -231,6 +231,21 @@ Here's the full lifecycle:
 
 ---
 
+## Key Concepts
+
+| Concept | Description |
+|---------|-------------|
+| **Entity** | A named thing: person, client, project. Has a type and unique name. |
+| **Slot** | A key-value pair on an entity (e.g., `role: "Engineer"`). Scoped and bitemporal — old values are archived, not deleted. |
+| **Observation** | Free-text fact attached to an entity (e.g., "Prefers async communication"). Scoped. |
+| **Relation** | Directed link between two entities (e.g., Alice —works_at→ Acme). |
+| **Scope** | Namespace for data isolation. Slots and observations belong to a scope (e.g., `"global"`, `"acme"`, `"proj-a"`). |
+| **Scope chain** | Ordered list of scopes from general to specific: `["global", "acme", "proj-a"]`. Local overrides parent for the same slot. |
+| **Tier** | Agent importance level: 0 = no context, 1 = minimal, 2 = full (default), 3 = orchestrator (sees everything). |
+| **Briefing** | AI-generated summary of raw memory data, injected into agent's system prompt at startup. Cached and invalidated adaptively. |
+
+---
+
 ## Features
 
 ### Scoped Memory
@@ -452,7 +467,7 @@ pip install -e ".[dev]"
 pytest
 ```
 
-296 tests covering store, config, hierarchy, context assembly, AI briefings, vault generation, hooks, dedup, and MCP bridge.
+300 tests covering store, config, hierarchy, context assembly, AI briefings, vault generation, hooks, dedup, and MCP bridge.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 

@@ -1,7 +1,10 @@
-"""AI Context Generation — LLM summarizes raw context into agent briefings.
+"""AI Briefing Generation — LLM summarizes raw context into agent briefings.
 
-Generates cached briefings per agent. SessionStart hook reads cache first,
-falls back to raw context if cache is stale or missing.
+Uses raw data from context.py, applies prompt templates, sends to LLM,
+and caches the result. Includes cache management, adaptive invalidation,
+template loading, and generation logging.
+
+For raw data assembly (no LLM) see context.py.
 """
 import json as _json
 import logging
@@ -774,7 +777,7 @@ def _extract_claude_md_sections(paths: list[Path]) -> dict[str, str]:
             continue
 
         # Extract ## Constraints or ## Rules sections
-        import re
+        import re  # noqa: E402 — deferred for optional code path
         for header in ("Constraints", "Rules"):
             pattern = rf"^## {header}\s*\n(.*?)(?=\n## |\Z)"
             match = re.search(pattern, content, re.MULTILINE | re.DOTALL)

@@ -189,6 +189,13 @@ class MCPBridge:
         deleted = 0
         blocked: list[str] = []
         for r in relations:
+            if not isinstance(r, dict):
+                blocked.append("Invalid relation: expected a dict")
+                continue
+            missing = [k for k in ("from", "to", "relationType") if k not in r]
+            if missing:
+                blocked.append(f"Invalid relation: missing fields {missing}")
+                continue
             from_id = self._store.find_entity(r["from"])
             to_id = self._store.find_entity(r["to"])
             if from_id is None or to_id is None:
@@ -232,8 +239,7 @@ class MCPBridge:
                 blocked.append(reason)
                 continue
             for obs_text in item["observations"]:
-                self._store.delete_observation_by_text(entity_id, obs_text)
-                deleted += 1
+                deleted += self._store.delete_observation_by_text(entity_id, obs_text)
         return {"deleted": deleted, "blocked": blocked}
 
     def open_nodes(self, names: list[str]) -> list[dict]:
@@ -283,6 +289,12 @@ class MCPBridge:
                     "relationType": r["type"],
                 })
         return {"entities": entities, "relations": all_relations}
+
+    def __enter__(self) -> "MCPBridge":
+        return self
+
+    def __exit__(self, *args) -> None:
+        self.close()
 
     def close(self) -> None:
         """Close the underlying database connection."""

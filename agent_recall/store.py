@@ -9,6 +9,23 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
+class _Transaction:
+    """Context manager that wraps store operations in a single SQLite transaction."""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self._conn = conn
+
+    def __enter__(self) -> "_Transaction":
+        self._conn.execute("BEGIN IMMEDIATE")
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        if exc_type is None:
+            self._conn.commit()
+        else:
+            self._conn.rollback()
+
+
 class MemoryStore:
     """SQLite-backed memory store for AI agents.
 
@@ -409,13 +426,15 @@ class MemoryStore:
                 (self._now(), observation_id),
             )
 
-    def delete_observation_by_text(self, entity_id: int, text: str) -> None:
+    def delete_observation_by_text(self, entity_id: int, text: str) -> int:
+        """Archive observations matching text. Returns number of rows affected."""
         with self._conn:
-            self._conn.execute(
+            cur = self._conn.execute(
                 "UPDATE observations SET archived_at = ? "
                 "WHERE entity_id = ? AND text = ? AND archived_at IS NULL",
                 (self._now(), entity_id, text),
             )
+        return cur.rowcount
 
     # --- Relations ---
 
@@ -500,6 +519,20 @@ class MemoryStore:
     def rollback(self) -> None:
         """Explicit rollback for error recovery in multi-step operations."""
         self._conn.rollback()
+
+    def transaction(self):
+        """Context manager for atomic multi-step operations.
+
+        All store operations within the block share a single transaction.
+        Commits on success, rolls back on exception.
+
+        Example::
+
+            with store.transaction():
+                store.set_slot(eid, "key", "val")
+                store.add_observation(eid, "text")
+        """
+        return _Transaction(self._conn)
 
     # --- Log Entries ---
 
@@ -605,6 +638,19 @@ class MemoryStore:
             ).fetchall():
                 found[r["id"]] = dict(r)
         return list(found.values())[:limit]
+
+    def count_scope(self, scope: str) -> dict[str, int]:
+        """Count active data in a scope. Returns {slots, observations, relations}."""
+        slots = self._conn.execute(
+            "SELECT COUNT(*) FROM slots WHERE scope = ? AND valid_to IS NULL",
+            (scope,)).fetchone()[0]
+        obs = self._conn.execute(
+            "SELECT COUNT(*) FROM observations WHERE scope = ? AND archived_at IS NULL",
+            (scope,)).fetchone()[0]
+        rels = self._conn.execute(
+            "SELECT COUNT(*) FROM relations WHERE scope = ? AND status = 'active'",
+            (scope,)).fetchone()[0]
+        return {"slots": slots, "observations": obs, "relations": rels}
 
     def rename_scope(self, old: str, new: str) -> dict:
         """Migrate all data from one scope to another.

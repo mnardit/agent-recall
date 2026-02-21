@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.1] - 2026-02-21
+
+### Added
+- `store.transaction()` context manager for atomic multi-step operations
+- `store.count_scope()` — count active slots, observations, relations in a scope
+- `ScopedView.get_entity()` now returns `observations` (filtered by scope chain)
+- `ScopedView.add_log()` returns `bool` indicating success
+- `MCPBridge` implements context manager protocol (`with MCPBridge(...) as b:`)
+- "Key Concepts" table in README (entity, slot, observation, scope, tier, briefing)
+
+### Fixed
+- **Quickstart example crash** — `KeyError: 'observations'` on line 25 (flagship example)
+- **Version mismatch** — `__init__.py` said 0.1.0 while `pyproject.toml` said 0.2.0
+- `merge_entities()` now truly atomic via `store.transaction()` (was pseudo-atomic)
+- `delete_observations()` returns accurate count (uses `rowcount` instead of always +1)
+- `delete_observation_by_text()` returns number of rows affected
+- `delete_relations()` validates input dict structure (was raising KeyError on malformed input)
+- CLI `get` shows error message on missing slot (was silent exit code 1)
+- CLI `rename-scope --dry-run` uses public `store.count_scope()` (was accessing private `_conn`)
+- README test count: 296 → 300
+- Module docstrings clarify `context.py` (raw assembly) vs `context_gen.py` (LLM briefings)
+
 ## [0.2.0] - 2026-02-20
 
 ### Added

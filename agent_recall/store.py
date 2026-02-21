@@ -262,6 +262,43 @@ class MemoryStore:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def find_entities_by_slot(
+        self, key: str, value: str | None = None,
+        entity_type: str | None = None, scope: str | None = None,
+    ) -> list[dict]:
+        """Find entities that have a current slot matching the given criteria.
+
+        Single SQL query — avoids N+1 pattern of list_entities + get_slots per entity.
+
+        Args:
+            key: Slot key to match (required).
+            value: If given, slot value must equal this.
+            entity_type: If given, filter entities by type.
+            scope: If given, filter slots by scope.
+
+        Returns:
+            List of ``{id, name, type}`` dicts for matching entities.
+        """
+        conditions = ["s.key = ?", "s.valid_to IS NULL"]
+        params: list[str] = [key]
+        if value is not None:
+            conditions.append("s.value = ?")
+            params.append(value)
+        if entity_type is not None:
+            conditions.append("e.type = ?")
+            params.append(entity_type)
+        if scope is not None:
+            conditions.append("s.scope = ?")
+            params.append(scope)
+        where = " AND ".join(conditions)
+        rows = self._conn.execute(
+            f"SELECT DISTINCT e.id, e.name, e.type FROM entities e "
+            f"JOIN slots s ON e.id = s.entity_id "
+            f"WHERE {where} ORDER BY e.name",
+            params,
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     def delete_entity(self, entity_id: int) -> None:
         with self._conn:
             self._conn.execute("DELETE FROM entities WHERE id = ?", (entity_id,))
@@ -651,6 +688,122 @@ class MemoryStore:
             "SELECT COUNT(*) FROM relations WHERE scope = ? AND status = 'active'",
             (scope,)).fetchone()[0]
         return {"slots": slots, "observations": obs, "relations": rels}
+
+    # --- Integrity Checks ---
+
+    def find_orphaned_scopes(self, valid_scopes: set[str]) -> list[str]:
+        """Find scopes present in DB but not in the provided valid set.
+
+        Checks both slots and observations tables.
+
+        Args:
+            valid_scopes: Set of known-good scope strings.
+
+        Returns:
+            Sorted list of orphaned scope strings.
+        """
+        db_scopes: set[str] = set()
+        for row in self._conn.execute("SELECT DISTINCT scope FROM slots"):
+            db_scopes.add(row[0])
+        for row in self._conn.execute("SELECT DISTINCT scope FROM observations"):
+            db_scopes.add(row[0])
+        return sorted(db_scopes - valid_scopes)
+
+    def find_duplicate_slots(self, entity_type: str | None = None) -> list[dict]:
+        """Find entities with duplicate current slots (same entity_id, key, scope).
+
+        Only considers active slots (valid_to IS NULL). Multiple active slots
+        for the same (entity, key, scope) indicate a data integrity issue.
+
+        Args:
+            entity_type: If given, only check entities of this type.
+
+        Returns:
+            List of ``{entity_id, entity_name, key, scope, count}`` dicts.
+        """
+        type_filter = ""
+        params: list[str] = []
+        if entity_type is not None:
+            type_filter = "AND e.type = ?"
+            params.append(entity_type)
+        rows = self._conn.execute(
+            f"SELECT s.entity_id, e.name, s.key, s.scope, COUNT(*) as cnt "
+            f"FROM slots s JOIN entities e ON s.entity_id = e.id "
+            f"WHERE s.valid_to IS NULL {type_filter} "
+            f"GROUP BY s.entity_id, s.key, s.scope "
+            f"HAVING cnt > 1 ORDER BY cnt DESC",
+            params,
+        ).fetchall()
+        return [
+            {"entity_id": r[0], "entity_name": r[1], "key": r[2],
+             "scope": r[3], "count": r[4]}
+            for r in rows
+        ]
+
+    def find_thin_entities(
+        self, exclude_types: set[str] | None = None,
+    ) -> list[dict]:
+        """Find entities with minimal data (<=1 slot and 0 observations).
+
+        Useful for identifying placeholder or orphaned entities.
+
+        Args:
+            exclude_types: Entity types to skip (e.g. {"draft", "topic"}).
+
+        Returns:
+            List of ``{entity_id, name, type, slots, observations}`` dicts.
+        """
+        exclude = exclude_types or set()
+        placeholders = ",".join("?" * len(exclude)) if exclude else ""
+        type_filter = f"AND e.type NOT IN ({placeholders})" if exclude else ""
+        rows = self._conn.execute(
+            f"SELECT e.id, e.name, e.type, "
+            f"  COALESCE(s.cnt, 0) as slot_cnt, "
+            f"  COALESCE(o.cnt, 0) as obs_cnt "
+            f"FROM entities e "
+            f"LEFT JOIN (SELECT entity_id, COUNT(*) as cnt FROM slots "
+            f"  WHERE valid_to IS NULL GROUP BY entity_id) s ON e.id = s.entity_id "
+            f"LEFT JOIN (SELECT entity_id, COUNT(*) as cnt FROM observations "
+            f"  WHERE archived_at IS NULL GROUP BY entity_id) o ON e.id = o.entity_id "
+            f"WHERE COALESCE(s.cnt, 0) <= 1 AND COALESCE(o.cnt, 0) = 0 "
+            f"  {type_filter} "
+            f"ORDER BY e.type, e.name",
+            list(exclude),
+        ).fetchall()
+        return [
+            {"entity_id": r[0], "name": r[1], "type": r[2],
+             "slots": r[3], "observations": r[4]}
+            for r in rows
+        ]
+
+    def check_integrity(
+        self, valid_scopes: set[str] | None = None,
+        exclude_types: set[str] | None = None,
+    ) -> dict:
+        """Run all integrity checks. Returns summary dict.
+
+        Args:
+            valid_scopes: Set of known-good scopes. If None, orphan check is skipped.
+            exclude_types: Entity types to skip in thin-entity check.
+                Defaults to ``{"draft", "topic"}``.
+
+        Returns:
+            Dict with keys: ``orphaned_scopes``, ``duplicate_slots``, ``thin_entities``.
+            Each value is a list (empty if no issues).
+        """
+        if exclude_types is None:
+            exclude_types = {"draft", "topic"}
+        result: dict[str, list] = {
+            "orphaned_scopes": [],
+            "duplicate_slots": [],
+            "thin_entities": [],
+        }
+        if valid_scopes is not None:
+            result["orphaned_scopes"] = self.find_orphaned_scopes(valid_scopes)
+        result["duplicate_slots"] = self.find_duplicate_slots()
+        result["thin_entities"] = self.find_thin_entities(
+            exclude_types=exclude_types)
+        return result
 
     def rename_scope(self, old: str, new: str) -> dict:
         """Migrate all data from one scope to another.

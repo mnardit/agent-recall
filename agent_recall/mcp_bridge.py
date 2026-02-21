@@ -84,8 +84,13 @@ class MCPBridge:
         )
 
     def create_entities(self, entities: list[dict]) -> dict:
-        """Create entities with optional observations. Returns {created: int, blocked: list}."""
+        """Create or update entities with observations.
+
+        Returns {created: int, updated: int, blocked: list}.
+        'created' = new entities, 'updated' = existing entities that got new observations.
+        """
         created = 0
+        updated = 0
         blocked: list[str] = []
         for e in entities:
             if not isinstance(e, dict) or "name" not in e:
@@ -105,8 +110,11 @@ class MCPBridge:
             entity_id = self._store.resolve_entity(name, etype)
             for obs in e.get("observations", []):
                 self._store.add_observation(entity_id, obs, scope=self._scope)
-            created += 1
-        return {"created": created, "blocked": blocked}
+            if existing_id is not None:
+                updated += 1
+            else:
+                created += 1
+        return {"created": created, "updated": updated, "blocked": blocked}
 
     def create_relations(self, relations: list[dict]) -> dict:
         """Create directed relations between entities. Returns {created: int, blocked: list}."""

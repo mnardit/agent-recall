@@ -692,6 +692,42 @@ def test_generate_all_uses_config_agents(tmp_path, config):
     assert len(results) > 0
 
 
+def test_generate_all_slug_filter(tmp_path, config):
+    """slug_filter excludes agents from generation."""
+    _seed_enough_data(config)
+    results = generate_all(
+        agent_slugs=["acme", "proj-a"],
+        config=config, force=True, llm_caller=_fake_llm,
+        slug_filter=lambda s: s != "acme",
+    )
+    assert results["acme"] == "skip:filtered"
+    assert results["proj-a"] == "ok"
+
+
+def test_generate_all_project_dir_map(tmp_path, config):
+    """project_dir_map passes per-agent project directories."""
+    _seed_enough_data(config)
+    # Create a project dir with CLAUDE.md
+    proj_dir = tmp_path / "acme-project"
+    proj_dir.mkdir()
+    (proj_dir / "CLAUDE.md").write_text("# Acme instructions\nSpecial content here.")
+
+    captured = {}
+    def capturing_llm(prompt, model, timeout):
+        captured[prompt[:30]] = prompt
+        return "## Briefing\nGenerated."
+
+    results = generate_all(
+        agent_slugs=["acme"],
+        config=config, force=True, llm_caller=capturing_llm,
+        project_dir_map={"acme": proj_dir},
+    )
+    assert results["acme"] == "ok"
+    # Verify the CLAUDE.md content was discovered
+    prompt_text = list(captured.values())[0]
+    assert "Special content here" in prompt_text
+
+
 # --- agent status API ---
 
 def test_get_agent_status_cached(tmp_path, config):

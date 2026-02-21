@@ -406,3 +406,46 @@ def test_get_agent_no_warning_for_known(config, caplog):
     with caplog.at_level(logging.WARNING, logger="agent_recall"):
         config.get_agent("client-a")
     assert "Unknown slug" not in caplog.text
+
+
+# --- Env var resolution ---
+
+def test_env_var_db_path(tmp_path, monkeypatch):
+    """AGENT_RECALL_DB_PATH overrides default when no config file."""
+    custom_db = tmp_path / "custom" / "frames.db"
+    monkeypatch.setenv("AGENT_RECALL_DB_PATH", str(custom_db))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    config = load_config()
+    assert config.db_path == custom_db
+
+
+def test_env_var_cache_dir(tmp_path, monkeypatch):
+    """AGENT_RECALL_CACHE_DIR overrides default when no config file."""
+    custom_cache = tmp_path / "custom_cache"
+    monkeypatch.setenv("AGENT_RECALL_CACHE_DIR", str(custom_cache))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    config = load_config()
+    assert config.cache_dir == custom_cache
+
+
+def test_yaml_overrides_env_var(tmp_path, monkeypatch):
+    """YAML config db_path takes precedence over env var."""
+    yaml_db = tmp_path / "yaml.db"
+    env_db = tmp_path / "env.db"
+    monkeypatch.setenv("AGENT_RECALL_DB_PATH", str(env_db))
+    cfg_file = tmp_path / "memory.yaml"
+    cfg_file.write_text(f"db_path: {yaml_db}\n")
+    config = load_config(cfg_file)
+    assert config.db_path == yaml_db
+
+
+def test_env_var_with_yaml_no_db_path(tmp_path, monkeypatch):
+    """Env var fills in when YAML exists but has no db_path."""
+    env_db = tmp_path / "env.db"
+    monkeypatch.setenv("AGENT_RECALL_DB_PATH", str(env_db))
+    cfg_file = tmp_path / "memory.yaml"
+    cfg_file.write_text("briefing:\n  model: haiku\n")
+    config = load_config(cfg_file)
+    assert config.db_path == env_db

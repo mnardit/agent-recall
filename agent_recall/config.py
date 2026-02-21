@@ -1,5 +1,6 @@
 """YAML-based configuration for agent-recall."""
 import logging
+import os
 import yaml
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -14,6 +15,30 @@ DEFAULT_CONFIG_PATHS = [
 ]
 DEFAULT_DB_PATH = Path.home() / ".agent-recall" / "frames.db"
 DEFAULT_CACHE_DIR = Path.home() / ".agent-recall" / "context_cache"
+
+# Environment variable overrides (highest priority after explicit config)
+ENV_DB_PATH = "AGENT_RECALL_DB_PATH"
+ENV_CACHE_DIR = "AGENT_RECALL_CACHE_DIR"
+
+
+def _resolve_db_path(config_value: Path | None = None) -> Path:
+    """Resolve DB path: explicit config > env var > package default."""
+    if config_value is not None:
+        return config_value
+    env = os.environ.get(ENV_DB_PATH)
+    if env:
+        return Path(env).expanduser()
+    return DEFAULT_DB_PATH
+
+
+def _resolve_cache_dir(config_value: Path | None = None) -> Path:
+    """Resolve cache dir: explicit config > env var > package default."""
+    if config_value is not None:
+        return config_value
+    env = os.environ.get(ENV_CACHE_DIR)
+    if env:
+        return Path(env).expanduser()
+    return DEFAULT_CACHE_DIR
 
 
 @dataclass
@@ -166,7 +191,6 @@ class MemoryConfig:
 
 def _expand_path(raw: str) -> Path:
     """Expand ~ and env vars in path strings."""
-    import os  # noqa: E402 — deferred to avoid module-level side effects
     return Path(os.path.expandvars(raw)).expanduser()
 
 
@@ -187,7 +211,11 @@ def load_config(path: Path | str | None = None) -> MemoryConfig:
         if candidate.exists():
             return _parse_config(candidate)
 
-    return MemoryConfig()
+    # No config file — env vars still apply
+    return MemoryConfig(
+        db_path=_resolve_db_path(),
+        cache_dir=_resolve_cache_dir(),
+    )
 
 
 def _parse_config(config_path: Path) -> MemoryConfig:
@@ -244,9 +272,13 @@ def _parse_config(config_path: Path) -> MemoryConfig:
         vault_task_header = vault_cfg.get("task_header", "## Tasks")
         vault_auto_commit = vault_cfg.get("auto_commit", True)
 
+    # Resolve paths: YAML config > env var > package default
+    yaml_db = _expand_path(data["db_path"]) if "db_path" in data else None
+    yaml_cache = _expand_path(data["cache_dir"]) if "cache_dir" in data else None
+
     return MemoryConfig(
-        db_path=_expand_path(data["db_path"]) if "db_path" in data else DEFAULT_DB_PATH,
-        cache_dir=_expand_path(data["cache_dir"]) if "cache_dir" in data else DEFAULT_CACHE_DIR,
+        db_path=_resolve_db_path(yaml_db),
+        cache_dir=_resolve_cache_dir(yaml_cache),
         hierarchy=hierarchy,
         tiers=tiers,
         agent_types=agent_types,

@@ -61,6 +61,66 @@ def test_empty_name_rejected(store):
     with pytest.raises(ValueError, match="name cannot be empty"):
         store.resolve_entity("", "person")
 
+# --- find_entities_by_slot ---
+
+def test_find_entities_by_slot_basic(store):
+    eid = store.create_entity("Alice", "person")
+    store.set_slot(eid, "status", "active", scope="global")
+    results = store.find_entities_by_slot("status", "active")
+    assert len(results) == 1
+    assert results[0]["name"] == "Alice"
+
+def test_find_entities_by_slot_no_match(store):
+    eid = store.create_entity("Alice", "person")
+    store.set_slot(eid, "status", "active")
+    assert store.find_entities_by_slot("status", "inactive") == []
+    assert store.find_entities_by_slot("nonexistent") == []
+
+def test_find_entities_by_slot_key_only(store):
+    eid1 = store.create_entity("Alice", "person")
+    eid2 = store.create_entity("Bob", "person")
+    store.set_slot(eid1, "role", "dev")
+    store.set_slot(eid2, "role", "manager")
+    results = store.find_entities_by_slot("role")
+    assert len(results) == 2
+
+def test_find_entities_by_slot_entity_type_filter(store):
+    e1 = store.create_entity("Alice", "person")
+    e2 = store.create_entity("draft-001", "draft")
+    store.set_slot(e1, "status", "pending")
+    store.set_slot(e2, "status", "pending")
+    results = store.find_entities_by_slot("status", "pending", entity_type="draft")
+    assert len(results) == 1
+    assert results[0]["name"] == "draft-001"
+
+def test_find_entities_by_slot_scope_filter(store):
+    eid = store.create_entity("Alice", "person")
+    store.set_slot(eid, "role", "dev", scope="acme")
+    store.set_slot(eid, "hobby", "chess", scope="global")
+    assert len(store.find_entities_by_slot("role", scope="acme")) == 1
+    assert store.find_entities_by_slot("role", scope="global") == []
+
+def test_find_entities_by_slot_ignores_archived(store):
+    eid = store.create_entity("Alice", "person")
+    store.set_slot(eid, "status", "old")
+    store.set_slot(eid, "status", "new")  # archives "old"
+    results = store.find_entities_by_slot("status", "old")
+    assert results == []
+    results = store.find_entities_by_slot("status", "new")
+    assert len(results) == 1
+
+def test_find_entities_by_slot_all_filters(store):
+    e1 = store.create_entity("topic-a", "topic")
+    e2 = store.create_entity("topic-b", "topic")
+    e3 = store.create_entity("Alice", "person")
+    store.set_slot(e1, "parent_project", "acme", scope="topic-a")
+    store.set_slot(e2, "parent_project", "other-org", scope="topic-b")
+    store.set_slot(e3, "parent_project", "acme", scope="global")
+    results = store.find_entities_by_slot(
+        "parent_project", "acme", entity_type="topic", scope="topic-a")
+    assert len(results) == 1
+    assert results[0]["name"] == "topic-a"
+
 # --- Slots (scope-aware) ---
 
 def test_set_and_get_slot(store):
@@ -365,3 +425,87 @@ def test_rename_scope_skips_archived(store):
     counts = store.rename_scope("old-name", "new-name")
     assert counts["slots"] == 0
     assert counts["observations"] == 0
+
+
+# --- Integrity checks ---
+
+def test_find_orphaned_scopes(store):
+    eid = store.resolve_entity("Alice", "person")
+    store.set_slot(eid, "role", "dev", scope="known")
+    store.set_slot(eid, "hobby", "chess", scope="orphan")
+    store.add_observation(eid, "Note", scope="obs-orphan")
+    orphaned = store.find_orphaned_scopes({"global", "known"})
+    assert "orphan" in orphaned
+    assert "obs-orphan" in orphaned
+    assert "known" not in orphaned
+
+def test_find_orphaned_scopes_none(store):
+    eid = store.resolve_entity("Alice", "person")
+    store.set_slot(eid, "role", "dev", scope="global")
+    assert store.find_orphaned_scopes({"global"}) == []
+
+def test_find_duplicate_slots(store):
+    eid = store.resolve_entity("Alice", "person")
+    # Simulate duplicate: insert two active slots with same key+scope
+    store._conn.execute(
+        "INSERT INTO slots (entity_id, key, value, scope, valid_from) "
+        "VALUES (?, 'role', 'dev', 'global', '2025-01-01T00:00:00')",
+        (eid,))
+    store._conn.execute(
+        "INSERT INTO slots (entity_id, key, value, scope, valid_from) "
+        "VALUES (?, 'role', 'manager', 'global', '2025-01-02T00:00:00')",
+        (eid,))
+    store._conn.commit()
+    dupes = store.find_duplicate_slots()
+    assert len(dupes) == 1
+    assert dupes[0]["key"] == "role"
+    assert dupes[0]["count"] == 2
+
+def test_find_duplicate_slots_entity_type_filter(store):
+    e1 = store.resolve_entity("Alice", "person")
+    e2 = store.resolve_entity("draft-1", "draft")
+    # Create duplicates for both
+    for eid in (e1, e2):
+        store._conn.execute(
+            "INSERT INTO slots (entity_id, key, value, scope, valid_from) "
+            "VALUES (?, 'status', 'a', 'global', '2025-01-01')", (eid,))
+        store._conn.execute(
+            "INSERT INTO slots (entity_id, key, value, scope, valid_from) "
+            "VALUES (?, 'status', 'b', 'global', '2025-01-02')", (eid,))
+    store._conn.commit()
+    dupes = store.find_duplicate_slots(entity_type="draft")
+    assert len(dupes) == 1
+    assert dupes[0]["entity_name"] == "draft-1"
+
+def test_find_thin_entities(store):
+    e1 = store.resolve_entity("Alice", "person")
+    # Alice has 0 slots, 0 observations → thin
+    e2 = store.resolve_entity("Bob", "person")
+    store.set_slot(e2, "role", "dev")
+    store.set_slot(e2, "email", "bob@test.com")
+    # Bob has 2 slots → not thin
+    thin = store.find_thin_entities()
+    names = [t["name"] for t in thin]
+    assert "Alice" in names
+    assert "Bob" not in names
+
+def test_find_thin_entities_excludes_types(store):
+    store.resolve_entity("Alice", "person")
+    store.resolve_entity("topic-1", "topic")
+    thin = store.find_thin_entities(exclude_types={"topic"})
+    names = [t["name"] for t in thin]
+    assert "Alice" in names
+    assert "topic-1" not in names
+
+def test_check_integrity(store):
+    eid = store.resolve_entity("Alice", "person")
+    store.set_slot(eid, "role", "dev", scope="orphan-scope")
+    result = store.check_integrity(valid_scopes={"global"})
+    assert "orphan-scope" in result["orphaned_scopes"]
+    assert isinstance(result["duplicate_slots"], list)
+    assert isinstance(result["thin_entities"], list)
+
+def test_check_integrity_no_valid_scopes(store):
+    """check_integrity skips orphan check when valid_scopes is None."""
+    result = store.check_integrity()
+    assert result["orphaned_scopes"] == []

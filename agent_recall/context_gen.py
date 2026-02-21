@@ -999,26 +999,32 @@ def generate_all(
     config: MemoryConfig | None = None,
     force: bool = False,
     llm_caller: LLMCaller | None = None,
+    project_dir_map: dict[str, Path] | None = None,
+    slug_filter: Callable[[str], bool] | None = None,
 ) -> dict[str, str]:
     """Generate briefings for multiple agents. Returns {slug: status}.
-
-    Note: This function does not accept per-agent ``project_dir``. Auto-discovery
-    will scan CWD for all agents, which is usually wrong in batch mode.
-    For batch generation with per-agent project directories, call
-    ``generate_briefing()`` in a loop with explicit ``project_dir`` per agent.
 
     Args:
         agent_slugs: List of agent slugs to process. If None, uses config.all_agents().
         config: Memory configuration.
         force: Regenerate even if cache is fresh.
         llm_caller: Custom LLM invocation function.
+        project_dir_map: Optional mapping of slug to project directory for file
+            auto-discovery. Without this, auto-discovery scans CWD (usually wrong
+            in batch mode).
+        slug_filter: Optional predicate. Called with each slug; return False to skip.
+            Applied after agent_slugs filtering but before generation.
     """
     config = config or load_config()
     slugs = agent_slugs or config.all_agents()
+    dir_map = project_dir_map or {}
     results: dict[str, str] = {}
 
     with MemoryStore(config.db_path) as store:
         for slug in sorted(slugs):
+            if slug_filter is not None and not slug_filter(slug):
+                results[slug] = "skip:filtered"
+                continue
             if not config.get_agent_enabled(slug):
                 results[slug] = "skip:disabled"
                 continue
@@ -1028,8 +1034,11 @@ def generate_all(
                 continue
 
             try:
-                path_result = generate_briefing(slug, config=config, force=force,
-                                                llm_caller=llm_caller, store=store)
+                path_result = generate_briefing(
+                    slug, config=config, force=force,
+                    llm_caller=llm_caller, store=store,
+                    project_dir=dir_map.get(slug),
+                )
                 if path_result:
                     results[slug] = "ok"
                 else:

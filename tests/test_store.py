@@ -164,7 +164,7 @@ def test_get_slots_local_overrides_global(store):
     assert slots["status"] == "paused"
 
 def test_list_entities_in_scopes(store):
-    e1 = store.resolve_entity("Max", "person")
+    e1 = store.resolve_entity("Jordan", "person")
     store.set_slot(e1, "role", "owner", scope="global")
     e2 = store.resolve_entity("Alice", "person")
     store.set_slot(e2, "role", "contact", scope="client-a")
@@ -172,7 +172,7 @@ def test_list_entities_in_scopes(store):
     store.set_slot(e3, "role", "contact", scope="client-b")
     visible = store.list_entities_in_scopes(["global", "client-a"], entity_type="person")
     names = {e["name"] for e in visible}
-    assert names == {"Max", "Alice"}
+    assert names == {"Jordan", "Alice"}
 
 def test_list_entities_in_scopes_observation_only(store):
     """Entity with only observations (no slots) in scope is visible."""
@@ -330,17 +330,17 @@ def test_search_by_observation(store):
     assert any(r["name"] == "Alice" for r in results)
 
 def test_search_morphology_stem(store):
-    eid = store.resolve_entity("Max", "person")
-    store.add_observation(eid, "observation about sandpipers")
-    results = store.search("sandpiper")
-    assert any(r["name"] == "Max" for r in results)
+    eid = store.resolve_entity("Jordan", "person")
+    store.add_observation(eid, "observation about databases")
+    results = store.search("database")
+    assert any(r["name"] == "Jordan" for r in results)
 
 def test_search_multiword(store):
     e1 = store.resolve_entity("Alice", "person")
     store.add_observation(e1, "works at Google")
     e2 = store.resolve_entity("Bob", "person")
-    store.add_observation(e2, "birdwatching expert")
-    results = store.search("Google birdwatching")
+    store.add_observation(e2, "photography expert")
+    results = store.search("Google photography")
     names = {r["name"] for r in results}
     assert "Alice" in names
     assert "Bob" in names

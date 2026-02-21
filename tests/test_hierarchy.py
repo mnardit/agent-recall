@@ -6,7 +6,7 @@ from agent_recall.hierarchy import ScopedView
 @pytest.fixture
 def store(tmp_path):
     s = MemoryStore(tmp_path / "test.db")
-    e_max = s.resolve_entity("Max", "person")
+    e_max = s.resolve_entity("Jordan", "person")
     s.set_slot(e_max, "role", "owner", scope="global")
     s.set_slot(e_max, "timezone", "UTC", scope="global")
 
@@ -31,7 +31,7 @@ def test_scoped_get_local(store):
 
 def test_scoped_get_inherited(store):
     view = ScopedView(store, chain=["global", "acme", "client-a"])
-    assert view.get("Max", "role") == "owner"
+    assert view.get("Jordan", "role") == "owner"
     assert view.get("Alice", "role") == "PM"
 
 
@@ -50,7 +50,7 @@ def test_scoped_list_entities(store):
     view = ScopedView(store, chain=["global", "acme", "client-a"])
     persons = view.list_entities(entity_type="person")
     names = {p["name"] for p in persons}
-    assert names == {"Max", "Alice", "Bob"}
+    assert names == {"Jordan", "Alice", "Bob"}
 
 
 def test_scoped_set_writes_to_local(store):

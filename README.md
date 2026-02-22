@@ -376,7 +376,7 @@ AI briefings need an LLM to generate summaries. Two built-in backends:
 
 | Backend | Config | Install | Cost | Notes |
 |---------|--------|---------|------|-------|
-| `cli` (default) | `backend: cli` | Claude Code installed | Free on Max/Team subscription | Creates a session file per call |
+| `cli` (default) | `backend: cli` | Claude Code installed | Free on Claude Pro/Team subscription | Creates a session file per call |
 | `api` | `backend: api` | `pip install 'agent-recall[api]'` | Pay per token | Clean, no side effects, needs `ANTHROPIC_API_KEY` |
 
 Switch in `memory.yaml`:

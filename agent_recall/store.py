@@ -549,7 +549,7 @@ class MemoryStore:
         ).fetchall()
         return [dict(r) for r in outgoing], [dict(r) for r in incoming]
 
-    def transaction(self):
+    def transaction(self) -> _Transaction:
         """Context manager for atomic multi-step operations.
 
         All store operations within the block share a single transaction.

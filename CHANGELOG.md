@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.2] - 2026-02-22
+
+### Added
+- `store.find_entities_by_slot(key, value, entity_type, scope)` — single-query entity lookup by slot value
+- `store.find_orphaned_scopes()` — find scopes with no matching hierarchy or agent config
+- `store.find_duplicate_slots()` — detect duplicate active slots (same entity + key + scope)
+- `store.find_thin_entities()` — find entities with no slots and no observations
+- `store.check_integrity()` — run all integrity checks, returns structured report
+- `generate_all()` now accepts `project_dir_map` and `slug_filter` for production batch use
+- `AGENT_RECALL_DB_PATH` / `AGENT_RECALL_CACHE_DIR` environment variables (precedence: yaml > env > default)
+- `create_entities` MCP tool response now includes `updated` count (entities that already existed)
+
+### Fixed
+- Removed unused `commit()` / `rollback()` public methods from `MemoryStore` (use `transaction()` instead)
+- Removed unused `AGENT_TYPES` constant from `context_gen.py`
+- Removed unused `DEFAULT_CONFIG_PATHS` constant from `config.py`
+- Cleaned up 3 unused test imports (`AgentConfig`, `DISCOVERABLE_FILES`, `get_not_same_pairs`)
+- Ollama example now returns `LLMResult` (was returning plain `str`)
+- Test data uses neutral names instead of author-identifiable data
+
 ## [0.2.1] - 2026-02-21
 
 ### Added

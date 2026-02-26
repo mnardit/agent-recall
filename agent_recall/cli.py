@@ -147,13 +147,17 @@ def list_entities(ctx, entity_type, as_json):
 
 @main.command()
 @click.argument("query")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
 @click.pass_context
-def search(ctx, query):
+def search(ctx, query, as_json):
     """Search entities by name, slot, or observation."""
     with _store(ctx.obj["config"]) as store:
         results = store.search(query)
-        for r in results:
-            click.echo(f"  {r['name']} ({r['type']})")
+        if as_json:
+            click.echo(json.dumps(results, ensure_ascii=False, indent=2))
+        else:
+            for r in results:
+                click.echo(f"  {r['name']} ({r['type']})")
 
 
 # --- history ---
@@ -262,18 +266,22 @@ def refresh(ctx, force):
 def rename_scope(ctx, old_scope, new_scope, dry_run):
     """Migrate all data from one scope to another."""
     with _store(ctx.obj["config"]) as store:
-        if dry_run:
-            counts = store.count_scope(old_scope)
+        try:
+            if dry_run:
+                counts = store.count_scope(old_scope)
+                total = sum(counts.values())
+                click.echo(f"Dry run: would rename {old_scope!r} -> {new_scope!r}: "
+                            f"{counts['slots']} slots, {counts['observations']} observations, "
+                            f"{counts['relations']} relations ({total} total)")
+                return
+            counts = store.rename_scope(old_scope, new_scope)
             total = sum(counts.values())
-            click.echo(f"Dry run: would rename {old_scope!r} -> {new_scope!r}: "
+            click.echo(f"Renamed scope {old_scope!r} -> {new_scope!r}: "
                         f"{counts['slots']} slots, {counts['observations']} observations, "
                         f"{counts['relations']} relations ({total} total)")
-            return
-        counts = store.rename_scope(old_scope, new_scope)
-        total = sum(counts.values())
-        click.echo(f"Renamed scope {old_scope!r} -> {new_scope!r}: "
-                    f"{counts['slots']} slots, {counts['observations']} observations, "
-                    f"{counts['relations']} relations ({total} total)")
+        except ValueError as e:
+            click.echo(f"Error: {e}", err=True)
+            sys.exit(1)
 
 
 # --- status ---

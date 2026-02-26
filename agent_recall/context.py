@@ -285,7 +285,9 @@ def _load_vault_tasks(chain: list[str], vault_projects_dir: Path,
     for scope in reversed(chain):
         if scope == "global":
             continue
-        project_dir = vault_projects_dir / scope
+        project_dir = (vault_projects_dir / scope).resolve()
+        if not project_dir.is_relative_to(vault_projects_dir.resolve()):
+            continue  # reject path traversal attempt
         if project_dir.is_dir():
             return _extract_tasks_from_dir(project_dir, task_header, max_chars)
     return []

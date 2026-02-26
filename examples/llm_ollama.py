@@ -7,7 +7,7 @@ from agent_recall import generate_briefing, LLMResult
 def ollama_caller(prompt: str, model: str, timeout: int) -> LLMResult:
     resp = requests.post(
         "http://localhost:11434/api/generate",
-        json={"model": "llama3.1", "prompt": prompt, "stream": False},
+        json={"model": model or "llama3.1", "prompt": prompt, "stream": False},
         timeout=timeout,
     )
     resp.raise_for_status()

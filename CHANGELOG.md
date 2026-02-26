@@ -4,12 +4,30 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [0.2.3] - 2026-02-26
+
+### Added
+- `search --json` flag for machine-readable output
+- `entity --scope` option for scoped slot resolution (repeatable)
+- `entity` command now shows observations alongside slots
+- `log --author` option (default: "agent")
+- `list` and `logs` commands documented in README
+- Troubleshooting section in README (empty briefings, Windows python3, MCP connection)
+- Expanded Python API examples in README (search, history, transactions)
 
 ### Improved
 - `set` command — `ENTITY_TYPE` is now optional for existing entities (auto-lookup)
-- `entity` command — shows observations, supports `--scope` for scoped slot resolution
-- `log` command — `--author` option (default: "agent")
+- Editor messaging reframed as "MCP-native" (works everywhere, battle-tested with Claude Code)
+- `rename-scope` shows clean error messages instead of Python tracebacks
+
+### Fixed
+- **Security: format string injection** in custom briefing templates — replaced `str.format()` with safe manual substitution
+- **Security: path traversal** in vault task loading — scope names with `..` are now rejected
+- **Security: f-string SQL** in `find_orphaned_scopes()` — replaced with explicit parameterized queries
+- Comparison table removed — previous version had inaccurate claims about competitors
+- Hierarchy config format in README now matches actual YAML format
+- OpenAI and Ollama examples now use the `model` parameter passed by agent-recall
+- `examples/memory.yaml` now includes `backend`, `agents`, `adaptive`, `auto_discover` sections
 
 ## [0.2.2] - 2026-02-22
 

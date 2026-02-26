@@ -32,11 +32,24 @@ agent_types:
 
 # AI briefing settings
 briefing:
+  backend: cli          # "cli" = claude -p (free), "api" = Anthropic SDK (needs ANTHROPIC_API_KEY)
   model: opus           # LLM model for briefing generation
   timeout: 300          # seconds
   raw_budget: 50000     # max chars of raw context fed to LLM
   output_budget: 8000   # target briefing size
   cache_max_age: 86400  # 24 hours
+  adaptive: true        # auto-regenerate stale caches
+  min_cache_age: 1800   # minimum 30 min between regenerations
+  auto_discover: true   # include CLAUDE.md, README.md etc. in context
+
+# Per-agent overrides
+agents:
+  coordinator:
+    model: opus
+    output_budget: 12000
+  dashboard:
+    model: haiku
+    template: system    # use "system" builtin template instead of auto-detected type
 
 # Optional: custom prompt templates directory
 # Place .md files named by agent type: client.md, agency.md, etc.

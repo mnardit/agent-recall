@@ -15,24 +15,18 @@ After:   Agent starts with: "Alice — Lead Engineer at Acme, prefers async,
          last discussed the API migration on Feb 12"
 ```
 
-**First-class support for Claude Code** (used daily in production with 30+ agents).
-**Experimental:** Cursor, Windsurf, and Cline integrations are built via standard MCP, but need community testing. [PRs and issue reports welcome!](https://github.com/mnardit/agent-recall/issues)
+**MCP-native** — works with any editor that supports MCP. Battle-tested daily with Claude Code (30+ agents in production). Tested configs for Cursor, Windsurf, and Cline below. [PRs and issue reports welcome!](https://github.com/mnardit/agent-recall/issues)
 
 ### Why agent-recall?
 
-Other memory solutions exist (Mem0, Zep, LangGraph checkpointing). Here's what makes this different:
+Other memory solutions exist (Mem0, Zep/Graphiti, LangGraph). Here's what makes agent-recall different:
 
-| | agent-recall | Mem0 | Zep | LangGraph |
-|---|---|---|---|---|
-| **Deployment** | Local SQLite | Cloud-first | Self-hosted (Neo4j) | Postgres/SQLite |
-| **Multi-tenant** | Scope hierarchy | User IDs | Org-based | Thread-based |
-| **AI briefings** | Built-in | No | No | No |
-| **MCP integration** | Native | No | No | No |
-| **Temporal queries** | Bitemporal slots | Versioned | Valid at/invalid at | Checkpoints |
-| **Open source** | MIT | Limited | Yes | Apache 2.0 |
-| **Cost** | Free | Free tier + paid | Free | Free |
-
-**In short:** Local-first. Your data stays on your machine. Multi-tenant scope hierarchy, not just user IDs — built for agencies and teams managing multiple projects. AI briefings that summarize hundreds of facts into what actually matters. MCP-native — works with any editor that supports MCP.
+- **Scope hierarchy** — not flat memory. The same person can have different roles in different projects. Built for teams managing multiple workstreams, not single-user personalization. No other tool does multi-tenant scope chains with inheritance.
+- **AI briefings** — raw data dumps don't work. agent-recall uses an LLM to summarize hundreds of facts into structured, actionable context injected at session start.
+- **Local-first** — single SQLite file. No cloud, no vector DB, no Docker, no Neo4j. Your data stays on your machine.
+- **MCP-native** — 9 memory tools with proactive-saving instructions. Works with any editor that supports MCP.
+- **Bitemporal** — old values are archived, not deleted. Query what was true at any point in time.
+- **Zero mandatory dependencies** — just `pyyaml` + `click`. MCP and Anthropic SDK are optional extras.
 
 ---
 
@@ -107,7 +101,7 @@ Add to `.mcp.json` in your project root:
 </details>
 
 <details>
-<summary><strong>Cursor</strong> 🧪 Experimental — <a href="https://github.com/mnardit/agent-recall/issues">help wanted</a></summary>
+<summary><strong>Cursor</strong></summary>
 
 Add to `.cursor/mcp.json`:
 
@@ -124,7 +118,7 @@ Add to `.cursor/mcp.json`:
 </details>
 
 <details>
-<summary><strong>Windsurf</strong> 🧪 Experimental — <a href="https://github.com/mnardit/agent-recall/issues">help wanted</a></summary>
+<summary><strong>Windsurf</strong></summary>
 
 Add to `~/.codeium/windsurf/mcp_config.json`:
 
@@ -141,7 +135,7 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
 </details>
 
 <details>
-<summary><strong>Cline</strong> 🧪 Experimental — <a href="https://github.com/mnardit/agent-recall/issues">help wanted</a></summary>
+<summary><strong>Cline</strong></summary>
 
 Add to `cline_mcp_settings.json`:
 
@@ -320,7 +314,8 @@ cache_dir: ~/.agent-recall/context_cache
 # Scope hierarchy — which agents see which data
 hierarchy:
   acme-agency:
-    children: [client-a, client-b]
+    - client-a
+    - client-b
 
 # Tier 0 = no context injection, Tier 2 = full
 tiers:
@@ -418,10 +413,14 @@ agent-recall set Alice person role Engineer # Set slot (new entity — type requ
 agent-recall get Alice role                # Get slot value
 agent-recall entity Alice                  # Show entity details + observations
 agent-recall entity Alice --scope global --scope acme  # Scoped slot resolution
+agent-recall entity Alice --json           # JSON output
+agent-recall list                          # List all entities
+agent-recall list --type person            # Filter by type
 agent-recall search "engineer"             # Search entities
 agent-recall history Alice role            # Bitemporal slot history
 agent-recall log Alice "Joined the team"   # Add log entry
 agent-recall log Alice "Update" --author human  # Log with custom author
+agent-recall logs Alice                    # Show log entries
 agent-recall generate my-agent --force     # Generate AI briefing
 agent-recall refresh --force               # Refresh all briefings
 agent-recall rename-scope old-name new-name  # Migrate data between scopes
@@ -433,9 +432,11 @@ agent-recall rename-scope old-name new-name  # Migrate data between scopes
 from agent_recall import MemoryStore, ScopedView
 
 with MemoryStore() as store:
+    # Create entities
     alice = store.resolve_entity("Alice", "person")
     acme = store.resolve_entity("Acme Corp", "client")
 
+    # Scoped slots — same key, different values per scope
     store.set_slot(alice, "role", "Engineer", scope="global")
     store.set_slot(alice, "role", "Lead Engineer", scope="acme")
     store.add_observation(alice, "Prefers async communication", scope="acme")
@@ -445,9 +446,62 @@ with MemoryStore() as store:
     view = ScopedView(store, ["global", "acme"])
     entity = view.get_entity("Alice")
     print(entity["slots"]["role"])  # "Lead Engineer" (acme overrides global)
+
+    # Search across all entities
+    results = store.search("engineer")
+    print(results)  # [{"name": "Alice", "type": "person", ...}]
+
+    # Bitemporal history — see all past values
+    store.set_slot(alice, "role", "Staff Engineer", scope="acme")
+    history = store.get_slot_history(alice, "role")
+    # Returns: all values with valid_from/valid_to timestamps
+
+    # Atomic operations
+    with store.transaction():
+        bob = store.resolve_entity("Bob", "person")
+        store.set_slot(bob, "role", "PM")
+        store.add_relation(bob, acme, "works_at")
 ```
 
 See [`examples/quickstart.py`](examples/quickstart.py) for a runnable version.
+
+---
+
+## Troubleshooting
+
+<details>
+<summary><strong>Agent doesn't save facts automatically</strong></summary>
+
+The MCP server includes instructions that tell the agent to proactively save. If it's not working:
+1. Verify the MCP server is connected: your agent should list `create_entities`, `search_nodes` etc. as available tools
+2. Check the server is running: `python3 -m agent_recall.mcp_server` should start without errors
+3. Some agents need a nudge — mention "save this to memory" in your prompt
+</details>
+
+<details>
+<summary><strong>Briefings are empty or generation fails</strong></summary>
+
+1. Check you have data: `agent-recall status` should show entities
+2. The default `cli` backend needs Claude Code installed (`claude -p`). If you don't use Claude, configure the `api` backend with `ANTHROPIC_API_KEY`, or pass your own `llm_caller` (see [LLM Backend](#llm-backend))
+3. Run with force: `agent-recall generate my-agent --force`
+4. Check cache dir exists: `ls ~/.agent-recall/context_cache/`
+</details>
+
+<details>
+<summary><strong>Windows: <code>python3</code> not found</strong></summary>
+
+On Windows, Python is usually `python` not `python3`. Update your MCP config:
+```json
+{
+  "mcpServers": {
+    "memory": {
+      "command": "python",
+      "args": ["-m", "agent_recall.mcp_server"]
+    }
+  }
+}
+```
+</details>
 
 ---
 

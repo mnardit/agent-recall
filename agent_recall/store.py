@@ -698,11 +698,11 @@ class MemoryStore:
         Returns:
             Sorted list of orphaned scope strings.
         """
-        db_scopes = {
-            row[0]
-            for table in ("slots", "observations")
-            for row in self._conn.execute(f"SELECT DISTINCT scope FROM {table}")
-        }
+        db_scopes: set[str] = set()
+        for row in self._conn.execute("SELECT DISTINCT scope FROM slots"):
+            db_scopes.add(row[0])
+        for row in self._conn.execute("SELECT DISTINCT scope FROM observations"):
+            db_scopes.add(row[0])
         return sorted(db_scopes - valid_scopes)
 
     def find_duplicate_slots(self, entity_type: str | None = None) -> list[dict]:

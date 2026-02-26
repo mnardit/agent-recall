@@ -942,9 +942,13 @@ def generate_briefing(
         agent_type = custom_template
         prompt = build_prompt(slug, agent_type, raw, output_budget, config.templates_dir)
     elif custom_template:
-        # Inline custom template — escape braces in raw context to prevent format() crashes
-        safe_raw = raw.replace("{", "{{").replace("}", "}}")
-        prompt = custom_template.format(slug=slug, raw_context=safe_raw, budget=output_budget)
+        # Inline custom template — use manual replacement to prevent format string injection.
+        # str.format() allows attribute access ({__class__.__init__...}) which is unsafe
+        # when template comes from config that could be written by agents.
+        prompt = (custom_template
+                  .replace("{slug}", slug)
+                  .replace("{raw_context}", raw)
+                  .replace("{budget}", str(output_budget)))
     else:
         prompt = build_prompt(slug, agent_type, raw, output_budget, config.templates_dir)
     log.info("Generating briefing for %s (%s, %d chars raw)", slug, agent_type, len(raw))

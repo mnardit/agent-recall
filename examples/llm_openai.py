@@ -7,7 +7,7 @@ from agent_recall import generate_briefing, LLMResult
 def openai_caller(prompt: str, model: str, timeout: int) -> LLMResult:
     client = OpenAI()  # uses OPENAI_API_KEY env var
     resp = client.chat.completions.create(
-        model="gpt-4o",
+        model=model or "gpt-4o",
         messages=[{"role": "user", "content": prompt}],
         timeout=timeout,
     )

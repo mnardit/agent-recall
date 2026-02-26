@@ -413,12 +413,15 @@ By default, briefing generation uses the `claude` CLI (`claude -p --model <model
 ```bash
 agent-recall init                          # Create database
 agent-recall status                        # Database stats
-agent-recall set Alice person role Engineer  # Set a scoped slot
+agent-recall set Alice role Engineer       # Set slot (existing entity)
+agent-recall set Alice person role Engineer # Set slot (new entity — type required)
 agent-recall get Alice role                # Get slot value
-agent-recall entity Alice                  # Show entity details
+agent-recall entity Alice                  # Show entity details + observations
+agent-recall entity Alice --scope global --scope acme  # Scoped slot resolution
 agent-recall search "engineer"             # Search entities
 agent-recall history Alice role            # Bitemporal slot history
-agent-recall log Alice "Joined the team"   # Add observation
+agent-recall log Alice "Joined the team"   # Add log entry
+agent-recall log Alice "Update" --author human  # Log with custom author
 agent-recall generate my-agent --force     # Generate AI briefing
 agent-recall refresh --force               # Refresh all briefings
 agent-recall rename-scope old-name new-name  # Migrate data between scopes

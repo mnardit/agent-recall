@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Improved
+- `set` command — `ENTITY_TYPE` is now optional for existing entities (auto-lookup)
+- `entity` command — shows observations, supports `--scope` for scoped slot resolution
+- `log` command — `--author` option (default: "agent")
+
 ## [0.2.2] - 2026-02-22
 
 ### Added

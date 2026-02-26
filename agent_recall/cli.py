@@ -48,15 +48,26 @@ def init(ctx, db):
 
 @main.command("set")
 @click.argument("entity")
-@click.argument("entity_type")
+@click.argument("entity_type", required=False, default=None)
 @click.argument("key")
 @click.argument("value")
 @click.option("--scope", default="global", help="Scope for the slot.")
 @click.pass_context
 def set_slot(ctx, entity, entity_type, key, value, scope):
-    """Set a slot value on an entity."""
+    """Set a slot value on an entity.
+
+    ENTITY_TYPE is optional for existing entities — it will be looked up
+    automatically. Required only when creating a new entity.
+    """
     with _store(ctx.obj["config"]) as store:
-        eid = store.resolve_entity(entity, entity_type)
+        existing = store.find_entity(entity)
+        if existing is not None:
+            eid = existing
+        elif entity_type:
+            eid = store.resolve_entity(entity, entity_type)
+        else:
+            click.echo(f"Entity '{entity}' not found. Specify ENTITY_TYPE to create it.", err=True)
+            sys.exit(1)
         store.set_slot(eid, key, value, scope=scope)
         click.echo(f"{entity}.{key} = {value}")
 
@@ -85,9 +96,11 @@ def get_slot(ctx, entity, key):
 
 @main.command()
 @click.argument("name")
+@click.option("--scope", multiple=True,
+              help="Scope chain for slot resolution (repeatable, e.g. --scope global --scope acme).")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
 @click.pass_context
-def entity(ctx, name, as_json):
+def entity(ctx, name, scope, as_json):
     """Show entity details."""
     with _store(ctx.obj["config"]) as store:
         eid = store.find_entity(name)
@@ -95,15 +108,22 @@ def entity(ctx, name, as_json):
             click.echo("Not found", err=True)
             sys.exit(1)
         e = store.get_entity(eid)
-        slots = store.get_slots(eid)
+        scope_chain = list(scope) if scope else None
+        slots = store.get_slots(eid, scope_chain=scope_chain)
+        obs = store.get_observations(eid)
         if as_json:
             click.echo(json.dumps({"id": e["id"], "name": e["name"],
-                                   "type": e["type"], "slots": slots},
+                                   "type": e["type"], "slots": slots,
+                                   "observations": obs},
                                   ensure_ascii=False, indent=2))
         else:
             click.echo(f"{e['name']} ({e['type']})")
             for k, v in slots.items():
                 click.echo(f"  {k}: {v}")
+            if obs:
+                click.echo("  observations:")
+                for o in obs:
+                    click.echo(f"    - {o['text']}")
 
 
 # --- list ---
@@ -166,14 +186,15 @@ def history(ctx, entity, key, as_json):
 @click.argument("entity")
 @click.argument("text")
 @click.option("--date", default=None, help="Override date (YYYY-MM-DD).")
+@click.option("--author", default="agent", help="Author of the log entry.")
 @click.pass_context
-def add_log(ctx, entity, text, date):
+def add_log(ctx, entity, text, date, author):
     """Add a log entry to an entity."""
     with _store(ctx.obj["config"]) as store:
         eid = store.find_entity(entity)
         if eid is None:
             eid = store.resolve_entity(entity, "entity")
-        store.add_log(eid, text, date=date)
+        store.add_log(eid, text, date=date, author=author)
         click.echo("OK")
 
 

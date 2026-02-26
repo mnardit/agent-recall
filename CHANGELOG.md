@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.4] - 2026-02-26
+
+### Changed
+- **`set` command: entity type is now `--type` option** (was broken positional argument). Usage: `agent-recall set Alice role Engineer --type person`
+- **Model alias `sonnet`** now maps to `claude-sonnet-4-6` (was legacy `claude-sonnet-4-5`)
+- Claude Code hooks example in README updated to current format (`type`, `matcher`, nested `hooks` array)
+- Python 3.13 added to CI matrix and classifiers
+
+### Fixed
+- `set` command 3-argument form actually works now (Click couldn't parse optional positional `ENTITY_TYPE`)
+- "Zero dependencies" claim corrected to "Minimal dependencies" (we have two: pyyaml, click)
+
 ## [0.2.3] - 2026-02-26
 
 ### Added

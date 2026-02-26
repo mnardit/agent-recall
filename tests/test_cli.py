@@ -37,7 +37,7 @@ def test_init(runner, tmp_path):
 
 def test_set_and_get(runner, db_path):
     result = runner.invoke(main, ["--db", db_path, "set",
-                                  "Bob", "person", "role", "Manager"])
+                                  "Bob", "role", "Manager", "--type", "person"])
     assert result.exit_code == 0
     assert "Bob.role = Manager" in result.output
 
@@ -102,7 +102,7 @@ def test_search(runner, db_path):
 def test_history(runner, db_path):
     # Set twice to create history
     runner.invoke(main, ["--db", db_path, "set",
-                         "Alice", "person", "role", "Senior Engineer"])
+                         "Alice", "role", "Senior Engineer", "--type", "person"])
     result = runner.invoke(main, ["--db", db_path, "history", "Alice", "role"])
     assert result.exit_code == 0
     assert "Engineer" in result.output

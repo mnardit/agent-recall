@@ -271,7 +271,7 @@ def build_prompt(slug: str, agent_type: str, raw_context: str,
 # Users write `model: opus` in YAML; the API backend resolves it to the full ID.
 MODEL_ALIASES: dict[str, str] = {
     "opus": "claude-opus-4-6",
-    "sonnet": "claude-sonnet-4-5-20250929",
+    "sonnet": "claude-sonnet-4-6",
     "haiku": "claude-haiku-4-5-20251001",
 }
 

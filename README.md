@@ -26,7 +26,7 @@ Other memory solutions exist (Mem0, Zep/Graphiti, LangGraph). Here's what makes 
 - **Local-first** — single SQLite file. No cloud, no vector DB, no Docker, no Neo4j. Your data stays on your machine.
 - **MCP-native** — 9 memory tools with proactive-saving instructions. Works with any editor that supports MCP.
 - **Bitemporal** — old values are archived, not deleted. Query what was true at any point in time.
-- **Zero mandatory dependencies** — just `pyyaml` + `click`. MCP and Anthropic SDK are optional extras.
+- **Minimal dependencies** — just `pyyaml` + `click`. MCP and Anthropic SDK are optional extras.
 
 ---
 
@@ -161,10 +161,25 @@ Add to `.claude/settings.json` (project or global):
 {
   "hooks": {
     "SessionStart": [
-      { "command": "agent-recall-session-start" }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "agent-recall-session-start"
+          }
+        ]
+      }
     ],
     "PostToolUse": [
-      { "command": "agent-recall-post-tool-use" }
+      {
+        "matcher": "mcp__memory__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "agent-recall-post-tool-use"
+          }
+        ]
+      }
     ]
   }
 }
@@ -173,7 +188,7 @@ Add to `.claude/settings.json` (project or global):
 | Hook | What it does |
 |------|-------------|
 | `SessionStart` | Injects AI briefing (or raw context) into the agent's system prompt when a session starts |
-| `PostToolUse` | After the agent writes to memory, invalidates stale caches and regenerates vault files |
+| `PostToolUse` | After the agent writes to memory (matched by `mcp__memory__.*`), invalidates stale caches and regenerates vault files |
 
 > **Other editors:** Hooks are Claude Code-specific. For other clients, use the [CLI](#cli) (`agent-recall generate`) or [Python API](#python-api) to generate and serve briefings.
 
@@ -409,7 +424,7 @@ By default, briefing generation uses the `claude` CLI (`claude -p --model <model
 agent-recall init                          # Create database
 agent-recall status                        # Database stats
 agent-recall set Alice role Engineer       # Set slot (existing entity)
-agent-recall set Alice person role Engineer # Set slot (new entity — type required)
+agent-recall set Alice role Engineer --type person  # Create new entity + set slot
 agent-recall get Alice role                # Get slot value
 agent-recall entity Alice                  # Show entity details + observations
 agent-recall entity Alice --scope global --scope acme  # Scoped slot resolution

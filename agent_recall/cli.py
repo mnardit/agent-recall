@@ -48,16 +48,16 @@ def init(ctx, db):
 
 @main.command("set")
 @click.argument("entity")
-@click.argument("entity_type", required=False, default=None)
 @click.argument("key")
 @click.argument("value")
+@click.option("--type", "entity_type", default=None,
+              help="Entity type (required for new entities, e.g. --type person).")
 @click.option("--scope", default="global", help="Scope for the slot.")
 @click.pass_context
-def set_slot(ctx, entity, entity_type, key, value, scope):
+def set_slot(ctx, entity, key, value, entity_type, scope):
     """Set a slot value on an entity.
 
-    ENTITY_TYPE is optional for existing entities — it will be looked up
-    automatically. Required only when creating a new entity.
+    For existing entities, --type is optional. For new entities, --type is required.
     """
     with _store(ctx.obj["config"]) as store:
         existing = store.find_entity(entity)
@@ -66,7 +66,7 @@ def set_slot(ctx, entity, entity_type, key, value, scope):
         elif entity_type:
             eid = store.resolve_entity(entity, entity_type)
         else:
-            click.echo(f"Entity '{entity}' not found. Specify ENTITY_TYPE to create it.", err=True)
+            click.echo(f"Entity '{entity}' not found. Use --type to create it.", err=True)
             sys.exit(1)
         store.set_slot(eid, key, value, scope=scope)
         click.echo(f"{entity}.{key} = {value}")

@@ -906,7 +906,7 @@ def test_resolve_model_aliases():
     """Model aliases resolve to full API IDs."""
     from agent_recall.context_gen import _resolve_model
     assert _resolve_model("opus") == "claude-opus-4-6"
-    assert _resolve_model("sonnet") == "claude-sonnet-4-5-20250929"
+    assert _resolve_model("sonnet") == "claude-sonnet-4-6"
     assert _resolve_model("haiku") == "claude-haiku-4-5-20251001"
     # Unknown model passes through unchanged
     assert _resolve_model("gpt-4o") == "gpt-4o"

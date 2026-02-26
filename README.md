@@ -15,7 +15,8 @@ After:   Agent starts with: "Alice — Lead Engineer at Acme, prefers async,
          last discussed the API migration on Feb 12"
 ```
 
-Works with **Claude Code**, **Cursor**, **Windsurf**, **Cline** — any MCP-compatible client.
+**First-class support for Claude Code** (used daily in production with 30+ agents).
+**Experimental:** Cursor, Windsurf, and Cline integrations are built via standard MCP, but need community testing. [PRs and issue reports welcome!](https://github.com/mnardit/agent-recall/issues)
 
 ### Why agent-recall?
 
@@ -89,7 +90,7 @@ This creates the SQLite database at `~/.agent-recall/frames.db`.
 This gives your agent the memory tools (`create_entities`, `add_observations`, `search_nodes`, etc.) and the instructions to use them proactively.
 
 <details open>
-<summary><strong>Claude Code</strong></summary>
+<summary><strong>Claude Code</strong> ✅ Production-tested</summary>
 
 Add to `.mcp.json` in your project root:
 
@@ -106,7 +107,7 @@ Add to `.mcp.json` in your project root:
 </details>
 
 <details>
-<summary><strong>Cursor</strong></summary>
+<summary><strong>Cursor</strong> 🧪 Experimental — <a href="https://github.com/mnardit/agent-recall/issues">help wanted</a></summary>
 
 Add to `.cursor/mcp.json`:
 
@@ -123,7 +124,7 @@ Add to `.cursor/mcp.json`:
 </details>
 
 <details>
-<summary><strong>Windsurf</strong></summary>
+<summary><strong>Windsurf</strong> 🧪 Experimental — <a href="https://github.com/mnardit/agent-recall/issues">help wanted</a></summary>
 
 Add to `~/.codeium/windsurf/mcp_config.json`:
 
@@ -140,7 +141,7 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
 </details>
 
 <details>
-<summary><strong>Cline</strong></summary>
+<summary><strong>Cline</strong> 🧪 Experimental — <a href="https://github.com/mnardit/agent-recall/issues">help wanted</a></summary>
 
 Add to `cline_mcp_settings.json`:
 

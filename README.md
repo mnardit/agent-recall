@@ -15,16 +15,16 @@ After:   Agent starts with: "Alice — Lead Engineer at Acme, prefers async,
          last discussed the API migration on Feb 12"
 ```
 
-**MCP-native** — works with any editor that supports MCP. Battle-tested daily with Claude Code (30+ agents in production). Tested configs for Cursor, Windsurf, and Cline below. [PRs and issue reports welcome!](https://github.com/mnardit/agent-recall/issues)
+**MCP-native** — designed for MCP-compatible clients. Tested configs included for Claude Code, Cursor, Windsurf, and Cline. Battle-tested daily with Claude Code (30+ agents in production). [PRs and issue reports welcome!](https://github.com/mnardit/agent-recall/issues)
 
 ### Why agent-recall?
 
-Other memory solutions exist (Mem0, Zep/Graphiti, LangGraph). Here's what makes agent-recall different:
+Other memory solutions exist (Mem0, Zep/Graphiti, LangMem). Here's what makes agent-recall different:
 
-- **Scope hierarchy** — not flat memory. The same person can have different roles in different projects. Built for teams managing multiple workstreams, not single-user personalization. No other tool does multi-tenant scope chains with inheritance.
+- **Scope hierarchy** — not flat memory. The same person can have different roles in different projects. agent-recall is built around scope chains with inheritance — designed for agents working across multiple clients, projects, and nested contexts.
 - **AI briefings** — raw data dumps don't work. agent-recall uses an LLM to summarize hundreds of facts into structured, actionable context injected at session start.
 - **Local-first** — single SQLite file. No cloud, no vector DB, no Docker, no Neo4j. Your data stays on your machine.
-- **MCP-native** — 9 memory tools with proactive-saving instructions. Works with any editor that supports MCP.
+- **MCP-native** — 9 memory tools with proactive-saving instructions. Tested configs for Claude Code, Cursor, Windsurf, and Cline.
 - **Bitemporal** — old values are archived, not deleted. Query what was true at any point in time.
 - **Minimal dependencies** — just `pyyaml` + `click`. MCP and Anthropic SDK are optional extras.
 

@@ -12,7 +12,7 @@ from agent_recall import generate_briefing, LLMResult
 def anthropic_caller(prompt: str, model: str, timeout: int) -> LLMResult:
     client = anthropic.Anthropic()  # uses ANTHROPIC_API_KEY env var
     resp = client.messages.create(
-        model=model or "claude-sonnet-4-5-20250929",
+        model=model or "claude-sonnet-4-6",
         max_tokens=4096,
         messages=[{"role": "user", "content": prompt}],
         timeout=timeout,

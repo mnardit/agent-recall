@@ -5,6 +5,7 @@ from pathlib import Path
 
 import click
 
+from agent_recall import __version__
 from agent_recall.config import MemoryConfig, load_config, DEFAULT_DB_PATH
 from agent_recall.store import MemoryStore
 
@@ -14,6 +15,7 @@ def _store(config: MemoryConfig) -> MemoryStore:
 
 
 @click.group()
+@click.version_option(version=__version__, prog_name="agent-recall")
 @click.option("--config", "config_path", type=click.Path(exists=True),
               help="Path to memory.yaml config file.")
 @click.option("--db", type=click.Path(), help="Override database path.")

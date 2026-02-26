@@ -35,6 +35,7 @@ class MemoryStore:
 
     Args:
         db_path: Path to SQLite database file. Created if it doesn't exist.
+            Defaults to ``~/.agent-recall/frames.db`` if not provided.
         timeout: SQLite busy timeout in seconds (default 10).
 
     Example::
@@ -45,7 +46,10 @@ class MemoryStore:
             store.add_observation(eid, "Prefers async communication")
     """
 
-    def __init__(self, db_path: Path | str, timeout: float = 10.0) -> None:
+    def __init__(self, db_path: Path | str | None = None, timeout: float = 10.0) -> None:
+        if db_path is None:
+            from agent_recall.config import DEFAULT_DB_PATH
+            db_path = DEFAULT_DB_PATH
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self.db_path), timeout=timeout)

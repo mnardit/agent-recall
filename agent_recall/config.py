@@ -67,8 +67,32 @@ class MemoryConfig:
         return scopes
 
     def get_agent(self, slug: str) -> AgentConfig:
-        """Infer agent config from slug using hierarchy + tiers + agent_types."""
-        # Check orchestrator
+        """Infer agent config from slug using hierarchy + tiers + agent_types.
+
+        Resolution order for scope chain:
+        1. Explicit ``scope_chain`` in ``agents`` config section
+        2. Inferred from hierarchy + tiers
+        """
+        # 1. Check explicit scope_chain in agents config
+        agent_cfg = self.agents_config.get(slug, {})
+        explicit_chain = agent_cfg.get("scope_chain")
+        if explicit_chain is not None:
+            # Determine tier from tiers dict or default
+            tier = 2
+            for t, slugs in self.tiers.items():
+                if slug in slugs:
+                    tier = t
+                    break
+            agent_type = None
+            if slug in self.agent_types.get("orchestrator", []):
+                agent_type = "orchestrator"
+                tier = 3
+            elif slug in self.agent_types.get("system", []):
+                agent_type = "system"
+                tier = 1
+            return AgentConfig(slug=slug, tier=tier, chain=list(explicit_chain),
+                               agent_type=agent_type)
+        # 2. Check orchestrator
         if slug in self.agent_types.get("orchestrator", []):
             return AgentConfig(slug=slug, tier=3, chain=["global"],
                                agent_type="orchestrator")
@@ -286,7 +310,9 @@ def _parse_config(config_path: Path) -> MemoryConfig:
         vault_auto_commit = vault_cfg.get("auto_commit", True)
 
     # Resolve paths: YAML config > env var > package default
-    yaml_db = _expand_path(data["db_path"]) if "db_path" in data else None
+    # Accept both "db_path" and "database" as aliases
+    db_path_raw = data.get("db_path") or data.get("database")
+    yaml_db = _expand_path(db_path_raw) if db_path_raw else None
     yaml_cache = _expand_path(data["cache_dir"]) if "cache_dir" in data else None
 
     return MemoryConfig(

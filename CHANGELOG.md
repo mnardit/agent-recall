@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 - **Claude Code Plugin packaging** — `.claude-plugin/plugin.json`, `.mcp.json`, `hooks/hooks.json`. Install with `/plugins add mnardit/agent-recall` instead of manual config
+- **Explicit `scope_chain` in agents config** — `agents.<slug>.scope_chain` overrides inferred chain from hierarchy/tiers
+- **`database` alias for `db_path`** — config accepts both `db_path` and `database` keys
+
+### Fixed
+- **`get_agent()` ignored explicit `scope_chain`** — agents config `scope_chain` was parsed but never used; agents always got inferred chains
 
 ## [0.3.0] - 2026-02-27
 

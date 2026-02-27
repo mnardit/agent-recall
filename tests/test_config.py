@@ -449,3 +449,85 @@ def test_env_var_with_yaml_no_db_path(tmp_path, monkeypatch):
     cfg_file.write_text("briefing:\n  model: haiku\n")
     config = load_config(cfg_file)
     assert config.db_path == env_db
+
+
+# --- Explicit scope_chain in agents config ---
+
+def test_get_agent_explicit_scope_chain(tmp_path):
+    """Explicit scope_chain in agents section overrides inferred chain."""
+    (tmp_path / "memory.yaml").write_text("""\
+hierarchy:
+  acme: [client-a, client-b]
+agents:
+  client-a:
+    scope_chain: ["global", "acme", "special-scope", "client-a"]
+""")
+    config = load_config(tmp_path / "memory.yaml")
+    agent = config.get_agent("client-a")
+    assert agent.chain == ["global", "acme", "special-scope", "client-a"]
+    assert agent.tier == 2  # default
+
+
+def test_get_agent_explicit_scope_chain_with_tier(tmp_path):
+    """Explicit scope_chain respects tier from tiers dict."""
+    (tmp_path / "memory.yaml").write_text("""\
+tiers:
+  1: [my-agent]
+agents:
+  my-agent:
+    scope_chain: ["global", "custom"]
+""")
+    config = load_config(tmp_path / "memory.yaml")
+    agent = config.get_agent("my-agent")
+    assert agent.chain == ["global", "custom"]
+    assert agent.tier == 1
+
+
+def test_get_agent_explicit_scope_chain_orchestrator(tmp_path):
+    """Explicit scope_chain on orchestrator agent uses tier 3."""
+    (tmp_path / "memory.yaml").write_text("""\
+agent_types:
+  orchestrator: [boss]
+agents:
+  boss:
+    scope_chain: ["global", "everything"]
+""")
+    config = load_config(tmp_path / "memory.yaml")
+    agent = config.get_agent("boss")
+    assert agent.chain == ["global", "everything"]
+    assert agent.tier == 3
+    assert agent.agent_type == "orchestrator"
+
+
+def test_get_agent_explicit_scope_chain_unknown_agent(tmp_path):
+    """Explicit scope_chain works for agents not in hierarchy/tiers."""
+    (tmp_path / "memory.yaml").write_text("""\
+agents:
+  custom-agent:
+    scope_chain: ["global", "acme"]
+""")
+    config = load_config(tmp_path / "memory.yaml")
+    agent = config.get_agent("custom-agent")
+    assert agent.chain == ["global", "acme"]
+    assert agent.tier == 2
+
+
+# --- database alias for db_path ---
+
+def test_database_alias(tmp_path):
+    """'database' key is accepted as alias for 'db_path'."""
+    (tmp_path / "memory.yaml").write_text("""\
+database: /tmp/test/my.db
+""")
+    config = load_config(tmp_path / "memory.yaml")
+    assert config.db_path == Path("/tmp/test/my.db")
+
+
+def test_db_path_takes_precedence_over_database(tmp_path):
+    """'db_path' takes precedence when both are specified."""
+    (tmp_path / "memory.yaml").write_text("""\
+db_path: /tmp/primary.db
+database: /tmp/alias.db
+""")
+    config = load_config(tmp_path / "memory.yaml")
+    assert config.db_path == Path("/tmp/primary.db")

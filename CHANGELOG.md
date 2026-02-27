@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+- **Claude Code Plugin packaging** — `.claude-plugin/plugin.json`, `.mcp.json`, `hooks/hooks.json`. Install with `/plugins add mnardit/agent-recall` instead of manual config
+
 ## [0.3.0] - 2026-02-27
 
 ### Added

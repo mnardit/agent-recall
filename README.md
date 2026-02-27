@@ -68,7 +68,24 @@ Other memory solutions exist (Mem0, Zep/Graphiti, LangMem). Here's what makes ag
 
 ## Setup
 
-### Step 1: Install
+### Option A: Claude Code Plugin (recommended)
+
+```bash
+pip install 'agent-recall[mcp]'
+agent-recall init
+```
+
+Then in Claude Code:
+
+```
+/plugins add mnardit/agent-recall
+```
+
+This installs the MCP server and hooks automatically — no manual config needed.
+
+### Option B: Manual setup
+
+#### Step 1: Install
 
 ```bash
 pip install 'agent-recall[mcp]'
@@ -79,7 +96,7 @@ This creates the SQLite database at `~/.agent-recall/frames.db`.
 
 > `agent-recall[mcp]` installs with MCP server support. Use `pip install agent-recall` if you only need the Python API/CLI.
 
-### Step 2: Add MCP server to your editor
+#### Step 2: Add MCP server to your editor
 
 This gives your agent the memory tools (`create_entities`, `add_observations`, `search_nodes`, etc.) and the instructions to use them proactively.
 
@@ -151,7 +168,7 @@ Add to `cline_mcp_settings.json`:
 ```
 </details>
 
-### Step 3: (Claude Code) Add hooks for automatic context injection
+#### Step 3: (Claude Code) Add hooks for automatic context injection
 
 Hooks make the agent receive its memory briefing at the start of every session, and keep caches fresh after writes. **This step is optional but strongly recommended for Claude Code users.**
 
@@ -192,7 +209,7 @@ Add to `.claude/settings.json` (project or global):
 
 > **Other editors:** Hooks are Claude Code-specific. For other clients, use the [CLI](#cli) (`agent-recall generate`) or [Python API](#python-api) to generate and serve briefings.
 
-### Step 4: Verify it works
+#### Step 4: Verify it works
 
 Start a new session with your agent and look for:
 - The agent should have memory tools listed (e.g., `create_entities`, `search_nodes`)

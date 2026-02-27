@@ -83,7 +83,7 @@ _PROMPT_HEADER = (
 BUILTIN_TEMPLATES: dict[str, str] = {
     "client": (
         _PROMPT_HEADER
-        + "Agent: \"{slug}\" — manages a client project.\n\n"
+        + "Agent: \"{slug}\" — manages a project.\n\n"
         "INSTRUCTIONS (read these BEFORE processing the raw data):\n\n"
         "Generate a briefing with these sections:\n\n"
         "## Key People\n"
@@ -112,23 +112,23 @@ BUILTIN_TEMPLATES: dict[str, str] = {
     ),
     "agency": (
         _PROMPT_HEADER
-        + "Agent: \"{slug}\" — manages an agency/organization with multiple sub-clients.\n\n"
+        + "Agent: \"{slug}\" — manages a group of related projects and teams.\n\n"
         "INSTRUCTIONS (read before processing raw data):\n\n"
         "Generate a briefing with these sections:\n\n"
         "## Team\n"
         "All team members with: name, role, contact method, timezone, key traits.\n"
         "Use role descriptions from \"## Role Descriptions\" if available.\n"
         "Format as a table if 5+ people.\n\n"
-        "## Clients & Projects\n"
-        "Active clients grouped by priority. For each: status, current focus, key contact.\n"
-        "Prioritize by urgency and business importance.\n\n"
+        "## Projects\n"
+        "Active projects grouped by priority. For each: status, current focus, key contact.\n"
+        "Prioritize by urgency and importance.\n\n"
         "## Current Tasks\n"
-        "Cross-client and agency-level tasks. Group by area.\n\n"
+        "Cross-project tasks. Group by area.\n\n"
         "## Constraints & Rules\n"
         "Copy from \"## Agent Constraints\" section if present. "
         "If absent, omit this section entirely.\n\n"
         "## Context\n"
-        "Recent events, decisions, open questions that affect the agency.\n\n"
+        "Recent events, decisions, open questions.\n\n"
         "RULES:\n"
         "- Output only information from the raw data. Do not add external knowledge.\n"
         "- Language: match the raw data.\n\n"
@@ -137,7 +137,7 @@ BUILTIN_TEMPLATES: dict[str, str] = {
     ),
     "personal": (
         _PROMPT_HEADER
-        + "Agent: \"{slug}\" — personal/side project.\n\n"
+        + "Agent: \"{slug}\" — personal project.\n\n"
         "INSTRUCTIONS (read before processing raw data):\n\n"
         "Generate a concise briefing. Personal projects need less context than "
         "client work — keep it focused.\n\n"
@@ -218,7 +218,7 @@ BUILTIN_TEMPLATES: dict[str, str] = {
         "2. Key business contacts who affect multiple projects\n"
         "3. Skip people with no current operational role.\n\n"
         "## Agents & Projects\n"
-        "Overview grouped by category (clients, personal, system, topics). "
+        "Overview grouped by category. "
         "For each: current status and top priority.\n\n"
         "## Active Priorities\n"
         "Cross-project priorities, blockers, deadlines.\n"
@@ -246,7 +246,7 @@ def load_template(agent_type: str, templates_dir: Path | None = None) -> str:
     if templates_dir and templates_dir.is_dir():
         template_file = templates_dir / f"{agent_type}.md"
         if template_file.exists():
-            return template_file.read_text()
+            return template_file.read_text(encoding="utf-8")
     return BUILTIN_TEMPLATES.get(agent_type, BUILTIN_TEMPLATES["personal"])
 
 
@@ -401,7 +401,7 @@ def read_cache(slug: str, cache_dir: Path | None = None,
     if not is_cache_fresh(slug, cache_dir, max_age):
         return None
     try:
-        return get_cache_path(slug, cache_dir).read_text()
+        return get_cache_path(slug, cache_dir).read_text(encoding="utf-8")
     except OSError:
         return None
 
@@ -510,12 +510,12 @@ def _save_generation_log(slug: str, entry: dict, cache_dir: Path,
     entries: list[dict] = []
     if log_path.exists():
         try:
-            entries = _json.loads(log_path.read_text())
+            entries = _json.loads(log_path.read_text(encoding="utf-8"))
         except (_json.JSONDecodeError, OSError):
             entries = []
     entries.append(entry)
     entries = entries[-max_entries:]
-    log_path.write_text(_json.dumps(entries, indent=2))
+    log_path.write_text(_json.dumps(entries, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def get_generation_logs(slug: str, config: MemoryConfig | None = None) -> list[dict]:
@@ -538,7 +538,7 @@ def get_generation_logs(slug: str, config: MemoryConfig | None = None) -> list[d
     if not log_path.exists():
         return []
     try:
-        return _json.loads(log_path.read_text())
+        return _json.loads(log_path.read_text(encoding="utf-8"))
     except (_json.JSONDecodeError, OSError):
         return []
 
@@ -771,7 +771,7 @@ def _extract_claude_md_sections(paths: list[Path]) -> dict[str, str]:
         if not resolved.is_file():
             continue
         try:
-            content = resolved.read_text()
+            content = resolved.read_text(encoding="utf-8")
         except OSError:
             continue
 
@@ -807,7 +807,7 @@ def _load_context_files(paths: list[Path], budget: int) -> str:
             log.warning("Context file is not a regular file, skipping: %s", path)
             continue
         try:
-            content = resolved.read_text()
+            content = resolved.read_text(encoding="utf-8")
         except OSError:
             log.warning("Cannot read context file: %s", path)
             continue
@@ -988,7 +988,7 @@ def generate_briefing(
     log_entry["status"] = "ok"
 
     cache_dir.mkdir(parents=True, exist_ok=True)
-    cache_path.write_text(result)
+    cache_path.write_text(result, encoding="utf-8")
     clear_stale_marker(slug, cache_dir)
     _save_generation_log(slug, log_entry, cache_dir)
     log.info("Cached briefing for %s (%d chars)", slug, len(result))

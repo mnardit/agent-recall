@@ -34,8 +34,10 @@ def _bridge() -> MCPBridge:
         slug = os.environ.get("AGENT_RECALL_SLUG") or Path.cwd().name
         agent = config.get_agent(slug)
         scope = agent.chain[-1] if agent.chain else "global"
+        scope_reads = agent.agent_type != "orchestrator"
         bridge = MCPBridge(config.db_path, default_scope=scope,
-                           scope_chain=agent.chain, config=config)
+                           scope_chain=agent.chain, config=config,
+                           scope_reads=scope_reads)
     return bridge
 
 
@@ -117,13 +119,15 @@ def read_graph() -> str:
 
 
 @mcp.tool()
-def search_nodes(query: str) -> str:
+def search_nodes(query: str, limit: int = 10) -> str:
     """Search the knowledge graph by name or content.
 
     Use BEFORE creating entities to check for duplicates.
     Also use to recall information about people, projects, or decisions.
+
+    Returns up to `limit` results (default 10), filtered by scope.
     """
-    return json.dumps(_bridge().search_nodes(query), ensure_ascii=False)
+    return json.dumps(_bridge().search_nodes(query, limit=limit), ensure_ascii=False)
 
 
 @mcp.tool()

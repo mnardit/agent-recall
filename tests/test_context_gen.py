@@ -631,7 +631,7 @@ def test_generate_briefing_template_type_override(tmp_path):
     generate_briefing("my-agent", config=config, force=True, llm_caller=capturing_llm)
     # "my-agent" is hierarchy child → auto-detect = "client"
     # But override = "personal" → should use personal template text
-    assert "personal/side project" in captured["prompt"]
+    assert "personal project" in captured["prompt"]
 
 
 # --- enabled/disabled ---

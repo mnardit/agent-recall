@@ -139,7 +139,11 @@ def post_tool_use_hook() -> None:
 
     # Acquire exclusive lock (non-blocking) — skip locking on Windows
     lock_file = _tmpdir / "agent-recall-vault-regen.lock"
-    lock_fd = lock_file.open("w")
+    lock_fd = None
+    try:
+        lock_fd = lock_file.open("w")
+    except OSError:
+        return
     if fcntl is not None:
         try:
             fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -155,9 +159,10 @@ def post_tool_use_hook() -> None:
         finally:
             store.close()
     finally:
-        if fcntl is not None:
+        if fcntl is not None and lock_fd is not None:
             fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
-        lock_fd.close()  # Always close, even on Windows
+        if lock_fd is not None:
+            lock_fd.close()
 
     # Auto-commit if enabled
     if config.vault_auto_commit:

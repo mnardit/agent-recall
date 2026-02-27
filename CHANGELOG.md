@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.0] - 2026-02-27
+
+### Added
+- **`scope_reads` parameter on `MCPBridge`** — generic boolean to control whether read operations (`search_nodes`, `open_nodes`, `read_graph`) filter results by scope chain. Replaces hardcoded agent-type checks with a clean, configurable option. Default: `True` (filtered)
+- **Scope filtering on `open_nodes()` and `read_graph()`** — these MCP tools now respect scope isolation, matching `search_nodes()` behavior. Previously they returned all entities regardless of scope, making scope enforcement incomplete
+- **Observation cap (20 per entity)** on all read operations — prevents context bloat when entities accumulate many observations
+- **Configurable `default_agent_type`** in briefing config — `briefing.default_agent_type` setting, defaults to `"personal"`
+- **Per-agent type override** via `agents.<slug>.type` in config — takes precedence over inference from hierarchy/tiers
+
+### Fixed
+- **Scope isolation on reads was incomplete** — `open_nodes()` and `read_graph()` bypassed scope filtering entirely, allowing any agent to read the full knowledge graph. Now all three read methods use shared scope helpers (`_read_scope_set`, `_entity_visible`, `_filter_observations`)
+- **`get_agent()` tiers vs hierarchy precedence** — agents listed in both `tiers` and `hierarchy.children` silently lost their parent scope from the chain. Now checks hierarchy inside the tiers branch to preserve the full chain
+- **`MCPBridge` resource leak** — if `strict_scopes` validation raised after `MemoryStore` was created, the database connection leaked. Constructor now wraps post-init logic in try/except to close on failure
+- **`hooks.py` `lock_fd` NameError** — if `lock_file.open()` raised `OSError`, the `finally` block crashed on undefined `lock_fd`
+- **Explicit `encoding="utf-8"`** on all `read_text()` / `write_text()` calls across config, context, context_gen, and vault_gen modules — prevents encoding errors on Windows with non-ASCII content
+- **Invalid tier key error** — `_parse_config()` now raises a clear `ValueError` with file path and key when a non-integer tier key is found
+
+### Changed
+- **Briefing templates use neutral terminology** — "client project" → "project", "agency/organization with multiple sub-clients" → "group of related projects and teams", "Clients & Projects" → "Projects". Templates are now domain-agnostic
+- `vault_gen._git_auto_commit()` accepts configurable `git_paths` parameter (was hardcoded)
+
+### Removed
+- `ScopedView.add_log()` — dead method, unused since log writes go through `MemoryStore.add_log()` directly
+
 ## [0.2.4] - 2026-02-26
 
 ### Changed

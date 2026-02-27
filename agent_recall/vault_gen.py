@@ -72,10 +72,12 @@ def trigger_vault_regen(store: MemoryStore | None = None,
     return True
 
 
-def _git_auto_commit(vault_dir: Path) -> None:
+def _git_auto_commit(vault_dir: Path,
+                     git_paths: list[str] | None = None) -> None:
     """Stage, commit, and push vault changes using git -C (no shell)."""
     git = ["git", "-C", str(vault_dir)]
-    subprocess.run(git + ["add", "people/", "clients/", "decisions/"],
+    paths = git_paths or ["people/", "clients/", "decisions/"]
+    subprocess.run(git + ["add"] + paths,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     diff = subprocess.run(git + ["diff", "--cached", "--quiet"])
     if diff.returncode != 0:
@@ -145,7 +147,7 @@ def generate_person(store: MemoryStore, entity_id: int, vault_dir: Path) -> Path
             lines.append(f"- {r['type']}: [[{r['to_name']}]]{status}")
 
     lines.append("")
-    path.write_text("\n".join(lines))
+    path.write_text("\n".join(lines), encoding="utf-8")
     return path
 
 
@@ -181,7 +183,7 @@ def generate_client(store: MemoryStore, entity_id: int, vault_dir: Path) -> Path
             lines.append(f"- {log['date']}: {log['text']}")
 
     lines.append("")
-    path.write_text("\n".join(lines))
+    path.write_text("\n".join(lines), encoding="utf-8")
     return path
 
 
@@ -198,6 +200,6 @@ def generate_vault(store: MemoryStore, vault_dir: Path) -> dict[str, int]:
         if full:
             dec_dir = vault_dir / "decisions"
             dec_dir.mkdir(parents=True, exist_ok=True)
-            (dec_dir / f"{_safe_filename(doc['name'])}.md").write_text(full["content"])
+            (dec_dir / f"{_safe_filename(doc['name'])}.md").write_text(full["content"], encoding="utf-8")
             stats["decisions"] += 1
     return stats

@@ -24,6 +24,9 @@ class MCPBridge:
             Used for scope enforcement — agents with chain length > 1 can only
             write to entities in their allowed scopes.
         config: Optional MemoryConfig for hierarchy lookups.
+        scope_reads: Whether to filter search results by scope (default True).
+            Set to False for orchestrators or admin agents that need
+            cross-scope visibility in search_nodes().
 
     Example::
 
@@ -36,22 +39,28 @@ class MCPBridge:
     def __init__(self, db_path: Path | str, default_scope: str = "global",
                  scope_chain: list[str] | None = None,
                  config: MemoryConfig | None = None,
-                 strict_scopes: bool = False) -> None:
+                 strict_scopes: bool = False,
+                 scope_reads: bool = True) -> None:
         self._store = MemoryStore(db_path)
-        self._scope = default_scope
-        self._chain = scope_chain or []
-        self._config = config
-        self._allowed_scopes = self._compute_allowed_scopes()
-        # Only enforce for agents with chain > 1 (skip orchestrator/tier0)
-        self._enforce = len(self._chain) > 1
-        # Validate scope against known scopes at init time
-        if strict_scopes and config:
-            known = config.known_scopes()
-            if self._scope not in known:
-                raise ValueError(
-                    f"Scope {self._scope!r} not in known scopes. "
-                    f"Check memory.yaml hierarchy or AGENT_RECALL_SLUG."
-                )
+        try:
+            self._scope = default_scope
+            self._chain = scope_chain or []
+            self._config = config
+            self._allowed_scopes = self._compute_allowed_scopes()
+            # Only enforce for agents with chain > 1 (skip orchestrator/tier0)
+            self._enforce = len(self._chain) > 1
+            self._scope_reads = scope_reads
+            # Validate scope against known scopes at init time
+            if strict_scopes and config:
+                known = config.known_scopes()
+                if self._scope not in known:
+                    raise ValueError(
+                        f"Scope {self._scope!r} not in known scopes. "
+                        f"Check memory.yaml hierarchy or AGENT_RECALL_SLUG."
+                    )
+        except Exception:
+            self._store.close()
+            raise
 
     def _compute_allowed_scopes(self) -> set[str]:
         allowed = set(self._chain)
@@ -250,45 +259,86 @@ class MCPBridge:
                 deleted += self._store.delete_observation_by_text(entity_id, obs_text)
         return {"deleted": deleted, "blocked": blocked}
 
+    def _read_scope_set(self) -> set[str] | None:
+        """Return the set of scopes this agent can read, or None for unrestricted."""
+        if self._enforce and self._scope_reads:
+            return self._allowed_scopes | set(self._chain)
+        return None
+
+    def _entity_visible(self, entity_id: int, scope_set: set[str]) -> bool:
+        """Check if entity is visible to this agent given scope_set."""
+        entity_scopes = self._store.get_entity_scopes(entity_id)
+        if not entity_scopes:
+            return True  # Global-only entity — visible to everyone
+        return bool(entity_scopes & scope_set)
+
+    def _filter_observations(self, obs: list[dict],
+                             scope_set: set[str] | None) -> list[str]:
+        """Filter observation texts by scope, cap at 20."""
+        if scope_set:
+            return [o["text"] for o in obs if o.get("scope") in scope_set][:20]
+        return [o["text"] for o in obs[:20]]
+
     def open_nodes(self, names: list[str]) -> list[dict]:
         """Get detailed info for entities by name. Returns list of {name, entityType, observations}."""
+        scope_set = self._read_scope_set()
         results = []
         for name in names:
             entity_id = self._store.find_entity(name)
             if entity_id is None:
+                continue
+            if scope_set and not self._entity_visible(entity_id, scope_set):
                 continue
             entity = self._store.get_entity(entity_id)
             obs = self._store.get_observations(entity_id)
             results.append({
                 "name": entity["name"],
                 "entityType": entity["type"],
-                "observations": [o["text"] for o in obs],
+                "observations": self._filter_observations(obs, scope_set),
             })
         return results
 
-    def search_nodes(self, query: str) -> list[dict]:
-        """Search entities by name, slot values, or observation text."""
-        found = self._store.search(query)
+    def search_nodes(self, query: str, limit: int = 10) -> list[dict]:
+        """Search entities by name, slot values, or observation text.
+
+        Results are filtered by scope chain when ``scope_reads`` is True
+        (default). Only entities with data in accessible scopes are returned.
+        Agents without scope enforcement (tier 0, single-scope) or with
+        ``scope_reads=False`` see all entities. Observations are capped at
+        20 per entity to prevent context bloat.
+        """
+        scope_set = self._read_scope_set()
+
+        # Over-fetch to account for scope filtering
+        found = self._store.search(query, limit=limit * 5 if scope_set else limit)
         results = []
         for f in found:
+            if scope_set and not self._entity_visible(f["id"], scope_set):
+                continue
             obs = self._store.get_observations(f["id"])
             results.append({
                 "name": f["name"],
                 "entityType": f["type"],
-                "observations": [o["text"] for o in obs],
+                "observations": self._filter_observations(obs, scope_set),
             })
+            if len(results) >= limit:
+                break
         return results
 
     def read_graph(self) -> dict:
-        """Read entire knowledge graph. Returns {entities: [...], relations: [...]}."""
+        """Read knowledge graph, filtered by scope. Returns {entities: [...], relations: [...]}."""
+        scope_set = self._read_scope_set()
         entities = []
         all_relations = []
-        for e in self._store.list_entities():
+        source = self._store.list_entities()
+        for e in source:
+            if scope_set and not self._entity_visible(e["id"], scope_set):
+                continue
             obs = self._store.get_observations(e["id"])
             entities.append({
                 "name": e["name"],
                 "entityType": e["type"],
-                "observations": [o["text"] for o in obs],
+                "observations": self._filter_observations(obs, scope_set),
             })
             for r in self._store.get_relations(e["id"]):
                 all_relations.append({

@@ -72,10 +72,18 @@ class MemoryConfig:
         if slug in self.agent_types.get("orchestrator", []):
             return AgentConfig(slug=slug, tier=3, chain=["global"],
                                agent_type="orchestrator")
-        # Check explicit tiers
+        # Check explicit tiers (also look up hierarchy for parent chain)
         for tier, slugs in self.tiers.items():
             if slug in slugs:
-                chain = [] if tier == 0 else ["global", slug]
+                if tier == 0:
+                    chain = []
+                else:
+                    # Check if slug is also a hierarchy child — preserve parent
+                    chain = ["global", slug]
+                    for parent, children in self.hierarchy.items():
+                        if slug in children:
+                            chain = ["global", parent, slug]
+                            break
                 return AgentConfig(slug=slug, tier=tier, chain=chain)
         # Check system agents
         if slug in self.agent_types.get("system", []):
@@ -97,23 +105,37 @@ class MemoryConfig:
         return AgentConfig(slug=slug, tier=2, chain=["global", slug])
 
     def get_agent_type(self, slug: str) -> str:
-        """Determine agent type for prompt template selection."""
+        """Determine agent type for prompt template selection.
+
+        Resolution order:
+        1. Explicit per-agent ``type`` in ``agents`` config section
+        2. ``agent_type`` from get_agent() (orchestrator, system)
+        3. ``agent_types`` mapping
+        4. Inferred from hierarchy (children → "client", parents → "agency")
+        5. Default: ``briefing.default_agent_type`` or "personal"
+        """
+        # 1. Per-agent explicit override
+        agent_cfg = self.agents_config.get(slug, {})
+        if "type" in agent_cfg:
+            return agent_cfg["type"]
+        # 2. From get_agent() (orchestrator, system)
         agent = self.get_agent(slug)
         if agent.agent_type:
             return agent.agent_type
+        # 3. agent_types mapping
         for type_name, slugs in self.agent_types.items():
             if slug in slugs:
                 return type_name
-        # Infer from hierarchy
+        # 4. Infer from hierarchy
         for parent, children in self.hierarchy.items():
             if slug in children:
                 return "client"
         if slug in self.hierarchy:
             return "agency"
-        # Check tier
+        # 5. Configurable default
         if agent.tier == 0:
             return "system"
-        return "personal"
+        return self.briefing.get("default_agent_type", "personal")
 
     def get_agent_briefing(self, slug: str) -> dict[str, Any]:
         """Get briefing settings for a specific agent.
@@ -207,7 +229,7 @@ def load_config(path: Path | str | None = None) -> MemoryConfig:
 def _parse_config(config_path: Path) -> MemoryConfig:
     """Parse a YAML config file into MemoryConfig."""
     try:
-        data = yaml.safe_load(config_path.read_text()) or {}
+        data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError as e:
         raise ValueError(f"Invalid YAML in {config_path}: {e}") from e
 
@@ -222,7 +244,12 @@ def _parse_config(config_path: Path) -> MemoryConfig:
 
     tiers: dict[int, list[str]] = {}
     for tier_key, slugs in data.get("tiers", {}).items():
-        tiers[int(tier_key)] = slugs
+        try:
+            tiers[int(tier_key)] = slugs
+        except (ValueError, TypeError):
+            raise ValueError(
+                f"Invalid tier key {tier_key!r} in {config_path}: must be an integer"
+            ) from None
 
     agent_types: dict[str, list[str]] = {}
     for type_name, slugs in data.get("agent_types", {}).items():

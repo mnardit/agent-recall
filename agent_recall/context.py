@@ -300,7 +300,7 @@ def _extract_tasks_from_dir(project_dir: Path, task_header: str,
     chars = 0
 
     for md in sorted(project_dir.glob("*.md")):
-        text = md.read_text()
+        text = md.read_text(encoding="utf-8")
         in_section = False
         file_tasks: list[str] = []
         for line in text.splitlines():

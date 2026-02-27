@@ -51,11 +51,3 @@ class ScopedView:
             **kwargs) -> None:
         entity_id = self._store.resolve_entity(entity_name, entity_type)
         self._store.set_slot(entity_id, key, value, scope=self.local_scope, **kwargs)
-
-    def add_log(self, entity_name: str, text: str, **kwargs) -> bool:
-        """Add a log entry. Returns True if entity exists and log was added."""
-        entity_id = self._store.find_entity(entity_name)
-        if entity_id is not None:
-            self._store.add_log(entity_id, text, **kwargs)
-            return True
-        return False

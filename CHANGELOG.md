@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [0.4.0] - 2026-03-14
 
 ### Added
 - **Full-text search (FTS5)** with Porter stemmer. Falls back to LIKE if FTS5 is unavailable. Use `rebuild_fts()` to index existing databases

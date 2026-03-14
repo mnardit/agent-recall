@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agent-recall"
-version = "0.3.0"
+version = "0.4.0"
 description = "Persistent memory and AI briefings for coding agents — drop-in MCP server"
 readme = "README.md"
 license = "MIT"

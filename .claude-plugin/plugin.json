@@ -1,7 +1,7 @@
 {
   "name": "agent-recall",
   "description": "Persistent memory for AI coding agents. SQLite knowledge graph with scoped entities, MCP tools, and LLM-summarized briefings.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "author": {
     "name": "Max Nardit",
     "email": "max@nardit.com"

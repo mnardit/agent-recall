@@ -230,7 +230,7 @@ def test_scoped_write_blocked(tmp_path):
     ])
     assert result["added"] == 0
     assert len(result["blocked"]) == 1
-    assert "SCOPE VIOLATION" in result["blocked"][0]
+    assert "Write blocked" in result["blocked"][0]
     b_a.close()
 
 
@@ -399,5 +399,5 @@ def test_scoped_delete_relations_blocked(tmp_path):
     ])
     assert result["deleted"] == 0
     assert len(result["blocked"]) == 1
-    assert "SCOPE VIOLATION" in result["blocked"][0]
+    assert "Blocked" in result["blocked"][0]
     b_a.close()

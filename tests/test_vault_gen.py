@@ -1,7 +1,7 @@
 """Tests for Obsidian vault generation."""
 import pytest
 from agent_recall.store import MemoryStore
-from agent_recall.vault_gen import (
+from agent_recall.contrib.vault_gen import (
     generate_person, generate_client, generate_vault, trigger_vault_regen,
     _safe_filename,
 )
@@ -203,8 +203,11 @@ def test_safe_filename_normal():
 
 
 def test_safe_filename_path_traversal():
-    assert "/" not in _safe_filename("../../../etc/passwd")
-    assert ".." not in _safe_filename("../../../etc/passwd")
+    result = _safe_filename("../../../etc/passwd")
+    assert "/" not in result
+    assert "\\" not in result
+    # No leading dots (prevents hidden files / traversal as first component)
+    assert not result.startswith(".")
 
 
 def test_safe_filename_slash():
@@ -224,6 +227,7 @@ def test_generate_person_path_traversal(store, tmp_path):
     eid = store.resolve_entity("../../etc/malicious", "person")
     store.set_slot(eid, "role", "Attacker")
     path = generate_person(store, eid, tmp_path)
-    # File must stay within people/ dir
+    # File must stay within people/ dir — no path separators in filename
     assert path.parent == tmp_path / "people"
-    assert ".." not in path.name
+    assert "/" not in path.name
+    assert "\\" not in path.name

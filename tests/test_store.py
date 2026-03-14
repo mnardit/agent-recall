@@ -509,3 +509,232 @@ def test_check_integrity_no_valid_scopes(store):
     """check_integrity skips orphan check when valid_scopes is None."""
     result = store.check_integrity()
     assert result["orphaned_scopes"] == []
+
+
+# --- FTS5 Full-Text Search ---
+
+def test_fts_available(store):
+    """FTS5 should be available on Python 3.9+."""
+    assert store.has_fts is True
+
+
+def test_fts_search_exact_name(store):
+    """FTS search finds entity by exact name."""
+    store.resolve_entity("Alice", "person")
+    results = store.search("Alice")
+    assert any(r["name"] == "Alice" for r in results)
+
+
+def test_fts_search_partial_name(store):
+    """FTS search finds entity by word prefix via Porter stemmer."""
+    store.resolve_entity("Engineering", "department")
+    # Porter stemmer: "Engineer" stems similarly to "Engineering"
+    results = store.search("Engineer")
+    assert any(r["name"] == "Engineering" for r in results)
+
+
+def test_fts_search_stemming_running_finds_run(store):
+    """Porter stemmer handles word forms: 'running' matches 'run'."""
+    eid = store.resolve_entity("Alice", "person")
+    store.add_observation(eid, "She enjoys running every morning")
+    results = store.search("run")
+    assert any(r["name"] == "Alice" for r in results)
+
+
+def test_fts_search_stemming_databases_finds_database(store):
+    """Porter stemmer: 'databases' matches 'database' query."""
+    eid = store.resolve_entity("Jordan", "person")
+    store.add_observation(eid, "Expert in databases and systems")
+    results = store.search("database")
+    assert any(r["name"] == "Jordan" for r in results)
+
+
+def test_fts_search_stemming_configured_finds_configure(store):
+    """Porter stemmer: 'configured' matches 'configure'."""
+    eid = store.resolve_entity("Server", "system")
+    store.add_observation(eid, "Server configured for production")
+    results = store.search("configure")
+    assert any(r["name"] == "Server" for r in results)
+
+
+def test_fts_search_multiword_or(store):
+    """Multi-word FTS query uses OR — matches any word."""
+    e1 = store.resolve_entity("Alice", "person")
+    store.add_observation(e1, "Works at Google")
+    e2 = store.resolve_entity("Bob", "person")
+    store.add_observation(e2, "Photography expert")
+    results = store.search("Google photography")
+    names = {r["name"] for r in results}
+    assert "Alice" in names
+    assert "Bob" in names
+
+
+def test_fts_search_observation_text(store):
+    """FTS search finds entity via observation content."""
+    eid = store.resolve_entity("Alice", "person")
+    store.add_observation(eid, "CEO of Acme Corp")
+    results = store.search("CEO")
+    assert any(r["name"] == "Alice" for r in results)
+
+
+def test_fts_search_slot_value(store):
+    """FTS search still finds entities by slot values (LIKE fallback)."""
+    eid = store.resolve_entity("Alice", "person")
+    store.set_slot(eid, "email", "alice@example.com")
+    results = store.search("alice@example")
+    assert any(r["name"] == "Alice" for r in results)
+
+
+def test_fts_search_archived_observations_excluded(store):
+    """FTS search does not return results from archived observations."""
+    eid = store.resolve_entity("Alice", "person")
+    oid = store.add_observation(eid, "Unique secret fact XYZ123")
+    store.archive_observation(oid)
+    results = store.search("XYZ123")
+    assert not any(r["name"] == "Alice" for r in results)
+
+
+def test_fts_search_no_results(store):
+    """FTS search returns empty list for non-matching query."""
+    store.resolve_entity("Alice", "person")
+    results = store.search("zzz_nonexistent_zzz")
+    assert results == []
+
+
+def test_fts_search_special_characters(store):
+    """FTS search handles special characters without crashing."""
+    eid = store.resolve_entity("Alice", "person")
+    store.add_observation(eid, "Email: alice@example.com")
+    # Should not crash on special FTS characters
+    results = store.search("alice@example.com")
+    assert isinstance(results, list)
+
+
+def test_fts_search_empty_query(store):
+    """FTS search handles empty query gracefully."""
+    store.resolve_entity("Alice", "person")
+    results = store.search("")
+    assert isinstance(results, list)
+
+
+def test_fts_triggers_sync_on_insert(store):
+    """FTS index is updated when new entity is inserted."""
+    store.resolve_entity("UniqueTestName", "person")
+    results = store.search("UniqueTestName")
+    assert len(results) == 1
+    assert results[0]["name"] == "UniqueTestName"
+
+
+def test_fts_triggers_sync_on_delete(store):
+    """FTS index is updated when entity is deleted."""
+    eid = store.resolve_entity("DeleteMe", "person")
+    results = store.search("DeleteMe")
+    assert len(results) == 1
+    store.delete_entity(eid)
+    results = store.search("DeleteMe")
+    assert len(results) == 0
+
+
+def test_fts_triggers_sync_observation_insert(store):
+    """FTS index for observations is updated on insert."""
+    eid = store.resolve_entity("Alice", "person")
+    store.add_observation(eid, "UniqueObservationText999")
+    results = store.search("UniqueObservationText999")
+    assert any(r["name"] == "Alice" for r in results)
+
+
+def test_fts_search_limit(store):
+    """FTS search respects the limit parameter."""
+    for i in range(20):
+        store.resolve_entity(f"TestEntity{i}", "item")
+    results = store.search("TestEntity", limit=5)
+    assert len(results) <= 5
+
+
+def test_rebuild_fts(tmp_path):
+    """rebuild_fts repopulates FTS indexes from existing data."""
+    # Create a store and add data WITHOUT FTS (simulate pre-FTS database)
+    db_file = tmp_path / "rebuild.db"
+    s = MemoryStore(db_file)
+    eid = s.resolve_entity("RebuildTest", "person")
+    s.add_observation(eid, "Important fact about rebuilding")
+    # Drop FTS tables and triggers to simulate a pre-FTS database
+    s._conn.executescript("""
+        DROP TABLE IF EXISTS entities_fts;
+        DROP TABLE IF EXISTS observations_fts;
+        DROP TRIGGER IF EXISTS entities_ai;
+        DROP TRIGGER IF EXISTS entities_ad;
+        DROP TRIGGER IF EXISTS entities_au;
+        DROP TRIGGER IF EXISTS observations_ai;
+        DROP TRIGGER IF EXISTS observations_ad;
+        DROP TRIGGER IF EXISTS observations_au;
+    """)
+    s.close()
+    # Reopen — _init_fts creates empty FTS tables + triggers
+    s = MemoryStore(db_file)
+    assert s.has_fts
+    # FTS is empty (data was inserted before FTS existed), rebuild it
+    s.rebuild_fts()
+    results = s.search("RebuildTest")
+    assert any(r["name"] == "RebuildTest" for r in results)
+    results = s.search("rebuilding")
+    assert any(r["name"] == "RebuildTest" for r in results)
+    s.close()
+
+
+def test_rebuild_fts_with_existing_data(tmp_path):
+    """rebuild_fts works correctly with pre-existing data in tables."""
+    db_file = tmp_path / "rebuild_multi.db"
+    s = MemoryStore(db_file)
+    for name in ["Alice", "Bob", "Charlie"]:
+        eid = s.resolve_entity(name, "person")
+        s.add_observation(eid, f"{name} works at Acme Corp")
+    # Drop and recreate FTS to simulate upgrade
+    s._conn.executescript("""
+        DROP TABLE IF EXISTS entities_fts;
+        DROP TABLE IF EXISTS observations_fts;
+        DROP TRIGGER IF EXISTS entities_ai;
+        DROP TRIGGER IF EXISTS entities_ad;
+        DROP TRIGGER IF EXISTS entities_au;
+        DROP TRIGGER IF EXISTS observations_ai;
+        DROP TRIGGER IF EXISTS observations_ad;
+        DROP TRIGGER IF EXISTS observations_au;
+    """)
+    s.close()
+    s = MemoryStore(db_file)
+    s.rebuild_fts()
+    for name in ["Alice", "Bob", "Charlie"]:
+        results = s.search(name)
+        assert any(r["name"] == name for r in results), f"Failed to find {name} after rebuild"
+    s.close()
+
+
+def test_rebuild_fts_not_available(tmp_path):
+    """rebuild_fts raises RuntimeError when FTS5 is not available."""
+    s = MemoryStore(tmp_path / "nofts.db")
+    s._has_fts = False  # Simulate FTS unavailable
+    with pytest.raises(RuntimeError, match="FTS5 is not available"):
+        s.rebuild_fts()
+    s.close()
+
+
+def test_fts_backward_compat_like_fallback(tmp_path):
+    """When _has_fts is False, search falls back to LIKE-based search."""
+    s = MemoryStore(tmp_path / "fallback.db")
+    s._has_fts = False  # Simulate FTS unavailable
+    eid = s.resolve_entity("Alice", "person")
+    s.add_observation(eid, "CEO of Acme Corp")
+    results = s.search("CEO")
+    assert any(r["name"] == "Alice" for r in results)
+    results = s.search("Alice")
+    assert any(r["name"] == "Alice" for r in results)
+    s.close()
+
+
+def test_fts_case_insensitive(store):
+    """FTS search is case-insensitive (unicode61 tokenizer)."""
+    store.resolve_entity("Alice", "person")
+    results_lower = store.search("alice")
+    results_upper = store.search("ALICE")
+    assert any(r["name"] == "Alice" for r in results_lower)
+    assert any(r["name"] == "Alice" for r in results_upper)

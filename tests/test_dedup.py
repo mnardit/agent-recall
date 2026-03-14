@@ -1,7 +1,7 @@
 """Tests for entity deduplication utilities."""
 import pytest
 from agent_recall.store import MemoryStore
-from agent_recall.dedup import (
+from agent_recall.contrib.dedup import (
     normalize_name, extract_first_name, extract_all_name_parts,
     name_similarity, find_candidates, merge_entities,
 )

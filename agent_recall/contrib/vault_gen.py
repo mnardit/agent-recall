@@ -2,6 +2,7 @@
 
 Optional output plugin. Only active if vault_dir is configured.
 """
+import re
 import subprocess
 import tempfile
 import time
@@ -18,14 +19,14 @@ DISPLAY_SLOTS = ["role", "company", "email", "phone", "language",
 
 
 def _safe_filename(name: str) -> str:
-    """Sanitize entity name for use as filename (prevents path traversal)."""
-    # Strip directory components first — Path("../../etc/passwd").name → "passwd"
-    safe = Path(name).name
-    # Remove null bytes and replace remaining path separators
-    safe = safe.replace("\0", "").replace("/", "_").replace("\\", "_")
-    # Strip leading dots (prevent hidden files)
-    safe = safe.lstrip(".")
-    return safe or "unnamed"
+    """Sanitize entity name for use as filename.
+
+    Replaces unsafe characters instead of stripping path components,
+    so "Project/v2" becomes "Project_v2" (not just "v2").
+    """
+    safe = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', name)
+    safe = safe.strip(". ")
+    return safe[:200] or "unnamed"
 
 
 def trigger_vault_regen(store: MemoryStore | None = None,

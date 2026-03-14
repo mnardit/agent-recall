@@ -1,5 +1,6 @@
 """CLI for agent-recall — manage agent memory from the terminal."""
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -41,7 +42,25 @@ def init(ctx, db):
     db_path = Path(db) if db else config.db_path
     with MemoryStore(db_path):
         pass
-    click.echo(f"Database initialized: {db_path}")
+    click.echo(f"\u2713 Database initialized at {db_path}")
+    click.echo("")
+    click.echo("Next steps:")
+    click.echo("  1. Configure your MCP client to use agent-recall:")
+    click.echo("")
+    click.echo("     For Claude Code, add to .mcp.json:")
+    click.echo('       {"mcpServers": {"memory": {"command": "python3", '
+               '"args": ["-m", "agent_recall.mcp_server"]}}}')
+    click.echo("")
+    click.echo("  2. Set your agent slug:")
+    click.echo("       export AGENT_RECALL_SLUG=my-agent")
+    click.echo("")
+    click.echo("  3. Generate your first briefing:")
+    click.echo("       agent-recall generate my-agent")
+    click.echo("")
+    click.echo("  4. (Optional) Install hooks for auto-briefing on session start.")
+    click.echo("     See: https://github.com/mnardit/agent-recall#setup")
+    click.echo("")
+    click.echo("Full documentation: https://github.com/mnardit/agent-recall")
 
 
 # --- set ---
@@ -83,7 +102,7 @@ def get_slot(ctx, entity, key):
     with _store(ctx.obj["config"]) as store:
         eid = store.find_entity(entity)
         if eid is None:
-            click.echo("Entity not found", err=True)
+            click.echo(f"Entity not found: '{entity}'", err=True)
             sys.exit(1)
         val = store.get_slot(eid, key)
         if val is None:
@@ -105,7 +124,7 @@ def entity(ctx, name, scope, as_json):
     with _store(ctx.obj["config"]) as store:
         eid = store.find_entity(name)
         if eid is None:
-            click.echo("Not found", err=True)
+            click.echo(f"Entity not found: '{name}'", err=True)
             sys.exit(1)
         e = store.get_entity(eid)
         scope_chain = list(scope) if scope else None
@@ -172,7 +191,7 @@ def history(ctx, entity, key, as_json):
     with _store(ctx.obj["config"]) as store:
         eid = store.find_entity(entity)
         if eid is None:
-            click.echo("Entity not found", err=True)
+            click.echo(f"Entity not found: '{entity}'", err=True)
             sys.exit(1)
         h = store.get_slot_history(eid, key)
         if as_json:
@@ -199,7 +218,7 @@ def add_log(ctx, entity, text, date, author):
         if eid is None:
             eid = store.resolve_entity(entity, "entity")
         store.add_log(eid, text, date=date, author=author)
-        click.echo("OK")
+        click.echo(f"Logged to {entity}: {text[:80]}")
 
 
 # --- logs ---
@@ -214,7 +233,7 @@ def show_logs(ctx, entity, limit, as_json):
     with _store(ctx.obj["config"]) as store:
         eid = store.find_entity(entity)
         if eid is None:
-            click.echo("Entity not found", err=True)
+            click.echo(f"Entity not found: '{entity}'", err=True)
             sys.exit(1)
         logs = store.get_logs(eid, limit=limit)
         if as_json:
@@ -222,6 +241,28 @@ def show_logs(ctx, entity, limit, as_json):
         else:
             for log in logs:
                 click.echo(f"  [{log['date']}] {log['text']}")
+
+
+# --- templates ---
+
+@main.command()
+@click.pass_context
+def templates(ctx):
+    """List available briefing template types."""
+    from agent_recall.context_gen.templates import (
+        BUILTIN_TEMPLATES, list_templates,
+    )
+    config = ctx.obj["config"]
+    templates_dir = config.templates_dir
+    names = list_templates(templates_dir)
+    for name in names:
+        if templates_dir and (templates_dir / f"{name}.md").is_file():
+            source = "file"
+        elif name in BUILTIN_TEMPLATES:
+            source = "builtin"
+        else:
+            source = "file"
+        click.echo(f"  {name} ({source})")
 
 
 # --- generate ---
@@ -300,3 +341,41 @@ def status(ctx):
         click.echo(f"Entities: {len(entities)}")
         for t, count in sorted(by_type.items()):
             click.echo(f"  {t}: {count}")
+
+
+# --- observe ---
+
+@main.command()
+@click.argument("entity_name")
+@click.argument("text")
+@click.option("--scope", default=None, help="Scope for the observation.")
+@click.pass_context
+def observe(ctx, entity_name, text, scope):
+    """Add an observation to an entity."""
+    with _store(ctx.obj["config"]) as store:
+        entity_id = store.find_entity(entity_name)
+        if entity_id is None:
+            click.echo(f"Entity not found: {entity_name}", err=True)
+            raise SystemExit(1)
+        scope = scope or os.environ.get("AGENT_RECALL_SLUG") or "global"
+        obs_id = store.add_observation(entity_id, text, scope=scope)
+        click.echo(f"Added observation #{obs_id} to {entity_name}")
+
+
+# --- delete ---
+
+@main.command()
+@click.argument("entity_name")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation.")
+@click.pass_context
+def delete(ctx, entity_name, yes):
+    """Delete an entity from the knowledge graph."""
+    with _store(ctx.obj["config"]) as store:
+        entity_id = store.find_entity(entity_name)
+        if entity_id is None:
+            click.echo(f"Entity not found: {entity_name}", err=True)
+            raise SystemExit(1)
+        if not yes:
+            click.confirm(f"Delete entity '{entity_name}' and all its data?", abort=True)
+        store.delete_entity(entity_id)
+        click.echo(f"Deleted: {entity_name}")

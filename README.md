@@ -219,6 +219,45 @@ Start a new session with your agent and look for:
 
 ---
 
+## Quick Start
+
+Get a working memory system in 3 minutes:
+
+```bash
+# Install
+pip install 'agent-recall[mcp]'
+
+# Initialize the database
+agent-recall init
+
+# Set your agent identity
+export AGENT_RECALL_SLUG=my-project
+
+# Add to your .mcp.json (Claude Code example)
+cat > .mcp.json << 'EOF'
+{
+  "mcpServers": {
+    "memory": {
+      "command": "python3",
+      "args": ["-m", "agent_recall.mcp_server"]
+    }
+  }
+}
+EOF
+
+# Start Claude Code — memory tools are now available!
+# The agent can create_entities, add_observations, search_nodes, etc.
+
+# Generate an AI briefing from stored knowledge
+agent-recall generate my-project
+```
+
+That's it! Your agent now has persistent memory across sessions. The MCP server
+exposes 9 tools for reading and writing the knowledge graph. See [Configuration](#configuration)
+for customization options.
+
+---
+
 ## What Happens Under the Hood
 
 Here's the full lifecycle:
@@ -548,6 +587,23 @@ Why specific features exist:
 - **Proactive saving instructions** — agents ignored memory tools until explicitly told to use them
 - **Bitemporal slots** — needed to track what was true *when*, not just what's true now
 
+### agent-recall vs Claude Code Auto-Memory
+
+| Feature | agent-recall | CC Auto-Memory |
+|---------|-------------|----------------|
+| **Storage** | SQLite knowledge graph | Markdown files |
+| **Structure** | Entities, relations, observations, scopes | Flat key-value in MEMORY.md |
+| **Multi-agent** | Shared DB with scope isolation | Per-project, single-agent |
+| **Search** | Full-text across entities, slots, observations | File-based |
+| **AI Briefings** | LLM-summarized context at session start | Raw memory injected |
+| **Scope control** | Hierarchical (global → parent → child) | Per-project directory |
+| **Best for** | Teams of agents, complex projects | Single agent, simple projects |
+
+They can work together: use auto-memory for quick preferences and agent-recall
+for structured knowledge that spans agents and sessions.
+
+---
+
 ## Development
 
 ```bash
@@ -557,7 +613,7 @@ pip install -e ".[dev]"
 pytest
 ```
 
-321 tests covering store, config, hierarchy, context assembly, AI briefings, vault generation, hooks, dedup, and MCP bridge.
+388 tests covering store, config, hierarchy, context assembly, AI briefings, vault generation, hooks, dedup, MCP bridge, FTS search, and migrations.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 

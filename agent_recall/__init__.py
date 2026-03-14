@@ -15,6 +15,7 @@ from agent_recall.context_gen import (
     generate_all,
     LLMResult,
 )
+from agent_recall.migrations import get_version, run_migrations, LATEST_VERSION
 
 __all__ = [
     "MemoryStore", "ScopedView", "MCPBridge",
@@ -24,5 +25,6 @@ __all__ = [
     "get_generation_logs",
     "generate_briefing", "generate_all",
     "LLMResult",
+    "get_version", "run_migrations", "LATEST_VERSION",
     "__version__",
 ]

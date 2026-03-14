@@ -36,6 +36,13 @@ class MCPBridge:
                                  "observations": ["New team member"]}])
     """
 
+    MAX_ENTITY_NAME = 500
+    MAX_OBSERVATION_TEXT = 10000
+    MAX_ENTITY_TYPE = 50
+    MAX_ITEMS_PER_CALL = 100
+    MAX_RELATION_TYPE = 200
+    MAX_RELATIONS = 5000
+
     def __init__(self, db_path: Path | str, default_scope: str = "global",
                  scope_chain: list[str] | None = None,
                  config: MemoryConfig | None = None,
@@ -88,7 +95,7 @@ class MCPBridge:
         entity = self._store.get_entity(entity_id)
         name = entity["name"] if entity else f"id={entity_id}"
         return False, (
-            f"SCOPE VIOLATION: Entity '{name}' belongs to scope(s) {specific}, "
+            f"Write blocked: Entity '{name}' belongs to scope(s) {specific}, "
             f"but your allowed scopes are {agent_specific}."
         )
 
@@ -98,9 +105,12 @@ class MCPBridge:
         Returns {created: int, updated: int, blocked: list}.
         'created' = new entities, 'updated' = existing entities that got new observations.
         """
+        blocked: list[str] = []
+        if len(entities) > self.MAX_ITEMS_PER_CALL:
+            blocked.append(f"Input truncated: {len(entities)} items exceeds limit of {self.MAX_ITEMS_PER_CALL}")
+            entities = entities[:self.MAX_ITEMS_PER_CALL]
         created = 0
         updated = 0
-        blocked: list[str] = []
         for e in entities:
             if not isinstance(e, dict) or "name" not in e:
                 blocked.append("Invalid entity: missing 'name' field")
@@ -109,7 +119,12 @@ class MCPBridge:
             if not isinstance(name, str) or not name.strip():
                 blocked.append("Invalid entity: 'name' must be a non-empty string")
                 continue
+            if len(name) > self.MAX_ENTITY_NAME:
+                blocked.append(f"Entity name too long ({len(name)} > {self.MAX_ENTITY_NAME}): '{name[:50]}...'")
+                continue
             etype = e.get("entityType", "entity")
+            if len(etype) > self.MAX_ENTITY_TYPE:
+                etype = etype[:self.MAX_ENTITY_TYPE]
             existing_id = self._store.find_entity(name, etype)
             if existing_id is not None:
                 ok, reason = self._entity_writable(existing_id)
@@ -118,6 +133,11 @@ class MCPBridge:
                     continue
             entity_id = self._store.resolve_entity(name, etype)
             for obs in e.get("observations", []):
+                if not isinstance(obs, str):
+                    continue
+                if len(obs) > self.MAX_OBSERVATION_TEXT:
+                    blocked.append(f"Observation too long ({len(obs)} > {self.MAX_OBSERVATION_TEXT}) for '{name}'")
+                    continue
                 self._store.add_observation(entity_id, obs, scope=self._scope)
             if existing_id is not None:
                 updated += 1
@@ -127,8 +147,11 @@ class MCPBridge:
 
     def create_relations(self, relations: list[dict]) -> dict:
         """Create directed relations between entities. Returns {created: int, blocked: list}."""
-        created = 0
         blocked: list[str] = []
+        if len(relations) > self.MAX_ITEMS_PER_CALL:
+            blocked.append(f"Input truncated: {len(relations)} items exceeds limit of {self.MAX_ITEMS_PER_CALL}")
+            relations = relations[:self.MAX_ITEMS_PER_CALL]
+        created = 0
         for r in relations:
             if not isinstance(r, dict):
                 blocked.append("Invalid relation: expected a dict")
@@ -137,15 +160,18 @@ class MCPBridge:
             if missing:
                 blocked.append(f"Invalid relation: missing fields {missing}")
                 continue
+            rel_type = r.get("relationType", "")
+            if len(str(rel_type)) > self.MAX_RELATION_TYPE:
+                blocked.append(f"Relation type too long ({len(str(rel_type))} > {self.MAX_RELATION_TYPE})")
+                continue
             from_id = self._store.find_entity(r["from"])
             to_id = self._store.find_entity(r["to"])
             if self._enforce and from_id is not None and to_id is not None:
                 from_ok = self._entity_writable(from_id)[0]
-                to_ok = self._entity_writable(to_id)[0]
-                if not from_ok and not to_ok:
+                if not from_ok:
                     blocked.append(
-                        f"SCOPE VIOLATION: Neither '{r['from']}' nor '{r['to']}' "
-                        f"is in your allowed scopes."
+                        f"Blocked: '{r['from']}' is not in your allowed scopes. "
+                        f"You can only create relations from entities you own."
                     )
                     continue
             if from_id is None:
@@ -159,8 +185,11 @@ class MCPBridge:
 
     def add_observations(self, observations: list[dict]) -> dict:
         """Add observations to existing entities. Returns {added: int, blocked: list}."""
-        added = 0
         blocked: list[str] = []
+        if len(observations) > self.MAX_ITEMS_PER_CALL:
+            blocked.append(f"Input truncated: {len(observations)} items exceeds limit of {self.MAX_ITEMS_PER_CALL}")
+            observations = observations[:self.MAX_ITEMS_PER_CALL]
+        added = 0
         for item in observations:
             if not isinstance(item, dict):
                 blocked.append("Invalid observation: expected a dict")
@@ -180,14 +209,23 @@ class MCPBridge:
                 blocked.append(reason)
                 continue
             for content in item["contents"]:
+                if not isinstance(content, str):
+                    blocked.append(f"Invalid observation type for '{item['entityName']}': expected string")
+                    continue
+                if len(content) > self.MAX_OBSERVATION_TEXT:
+                    blocked.append(f"Observation too long ({len(content)} > {self.MAX_OBSERVATION_TEXT}) for '{item['entityName']}'")
+                    continue
                 self._store.add_observation(entity_id, content, scope=self._scope)
                 added += 1
         return {"added": added, "blocked": blocked}
 
     def delete_entities(self, names: list[str]) -> dict:
         """Delete entities by name. Returns {deleted: int, blocked: list}."""
-        deleted = 0
         blocked: list[str] = []
+        if len(names) > self.MAX_ITEMS_PER_CALL:
+            blocked.append(f"Input truncated: {len(names)} items exceeds limit of {self.MAX_ITEMS_PER_CALL}")
+            names = names[:self.MAX_ITEMS_PER_CALL]
+        deleted = 0
         for name in names:
             entity_id = self._store.find_entity(name)
             if entity_id is None:
@@ -203,8 +241,11 @@ class MCPBridge:
 
     def delete_relations(self, relations: list[dict]) -> dict:
         """Archive relations between entities. Returns {deleted: int, blocked: list}."""
-        deleted = 0
         blocked: list[str] = []
+        if len(relations) > self.MAX_ITEMS_PER_CALL:
+            blocked.append(f"Input truncated: {len(relations)} items exceeds limit of {self.MAX_ITEMS_PER_CALL}")
+            relations = relations[:self.MAX_ITEMS_PER_CALL]
+        deleted = 0
         for r in relations:
             if not isinstance(r, dict):
                 blocked.append("Invalid relation: expected a dict")
@@ -225,12 +266,11 @@ class MCPBridge:
                 continue
             if self._enforce:
                 from_ok = self._entity_writable(from_id)[0]
-                to_ok = self._entity_writable(to_id)[0]
-                if not from_ok and not to_ok:
+                if not from_ok:
                     blocked.append(
-                        f"SCOPE VIOLATION: Cannot delete relation "
-                        f"'{r['from']}' -> '{r['to']}' — neither entity "
-                        f"is in your scope tree."
+                        f"Blocked: Cannot delete relation "
+                        f"'{r['from']}' -> '{r['to']}' — source entity "
+                        f"is not in your scope tree."
                     )
                     continue
             for rel in self._store.get_relations(from_id):
@@ -241,8 +281,11 @@ class MCPBridge:
 
     def delete_observations(self, deletions: list[dict]) -> dict:
         """Archive observations by text match. Returns {deleted: int, blocked: list}."""
-        deleted = 0
         blocked: list[str] = []
+        if len(deletions) > self.MAX_ITEMS_PER_CALL:
+            blocked.append(f"Input truncated: {len(deletions)} items exceeds limit of {self.MAX_ITEMS_PER_CALL}")
+            deletions = deletions[:self.MAX_ITEMS_PER_CALL]
+        deleted = 0
         for item in deletions:
             if not isinstance(item, dict) or "entityName" not in item or "observations" not in item:
                 blocked.append("Invalid deletion: missing 'entityName' or 'observations'")
@@ -307,6 +350,19 @@ class MCPBridge:
         ``scope_reads=False`` see all entities. Observations are capped at
         20 per entity to prevent context bloat.
         """
+        # Cap inputs to prevent DoS
+        MAX_QUERY_LENGTH = 500
+        MAX_LIMIT = 100
+        MAX_WORDS = 20
+
+        query = query[:MAX_QUERY_LENGTH]
+        limit = min(limit, MAX_LIMIT)
+
+        # Cap word count for search
+        words = query.split()
+        if len(words) > MAX_WORDS:
+            query = " ".join(words[:MAX_WORDS])
+
         scope_set = self._read_scope_set()
 
         # Over-fetch to account for scope filtering
@@ -325,11 +381,12 @@ class MCPBridge:
                 break
         return results
 
-    def read_graph(self) -> dict:
+    def read_graph(self, limit: int = 1000) -> dict:
         """Read knowledge graph, filtered by scope. Returns {entities: [...], relations: [...]}."""
         scope_set = self._read_scope_set()
         entities = []
         all_relations = []
+        seen_rels: set[tuple[str, str, str]] = set()
         source = self._store.list_entities()
         for e in source:
             if scope_set and not self._entity_visible(e["id"], scope_set):
@@ -341,11 +398,18 @@ class MCPBridge:
                 "observations": self._filter_observations(obs, scope_set),
             })
             for r in self._store.get_relations(e["id"]):
-                all_relations.append({
-                    "from": e["name"],
-                    "to": r["to_name"],
-                    "relationType": r["type"],
-                })
+                rel_key = (e["name"], r["to_name"], r["type"])
+                if rel_key not in seen_rels:
+                    seen_rels.add(rel_key)
+                    all_relations.append({
+                        "from": e["name"],
+                        "to": r["to_name"],
+                        "relationType": r["type"],
+                    })
+            if len(entities) >= limit:
+                break
+        if len(all_relations) > self.MAX_RELATIONS:
+            all_relations = all_relations[:self.MAX_RELATIONS]
         return {"entities": entities, "relations": all_relations}
 
     def __enter__(self) -> "MCPBridge":

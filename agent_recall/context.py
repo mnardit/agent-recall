@@ -2,12 +2,19 @@
 
 Builds a markdown document from database entities, slots, observations, and logs.
 Sections have explicit priorities (must-have -> nice-to-have) and are budget-aware.
-This is the data layer; for LLM-based summarization see context_gen.py.
+This is the data layer; for LLM-based summarization see context_gen/ package.
 """
 from pathlib import Path
 
 from agent_recall.store import MemoryStore
 from agent_recall.hierarchy import ScopedView
+from agent_recall.context_helpers import (
+    MAX_OBSERVATION_LENGTH,
+    format_observation,
+    format_slots,
+    format_entity_header,
+    apply_budget,
+)
 
 # Priority tiers (lower = more important, gets budget first)
 PRIORITY_MUST = 1
@@ -110,13 +117,13 @@ def assemble_context(store: MemoryStore, chain: list[str], tier: int,
                         secondary_lines.append(label)
                         continue
                 # Primary person (or short chain — full detail)
-                s = ", ".join(f"{k}: {v}" for k, v in entity["slots"].items())
-                line = f"- **{p['name']}** ({s})"
+                line = f"- {format_entity_header(p['name'], entity['slots'])}"
                 obs = store.get_observations(p["id"])
-                visible = [o["text"] for o in obs if o.get("scope") in chain_set]
+                visible = [o["text"][:MAX_OBSERVATION_LENGTH]
+                           for o in obs if o.get("scope") in chain_set]
                 if visible:
                     for o in visible[:5]:
-                        line += f"\n  - {o}"
+                        line += f"\n  - {format_observation(o)}"
                 primary_lines.append(line)
         all_lines = primary_lines[:]
         if secondary_lines:
@@ -161,19 +168,16 @@ def assemble_context(store: MemoryStore, chain: list[str], tier: int,
                                            scope_chain=chain[:-1])
             parent_obs = store.get_observations(parent_eid)
             parent_chain_set = set(chain[:-1]) | {"global"}
-            visible_obs = [o["text"] for o in parent_obs
+            visible_obs = [o["text"][:MAX_OBSERVATION_LENGTH]
+                           for o in parent_obs
                            if o.get("scope") in parent_chain_set]
             p_lines = []
             p_entity = store.get_entity(parent_eid)
             if p_entity:
-                header = f"**{p_entity['name']}**"
-                if parent_slots:
-                    s = ", ".join(f"{k}: {v}"
-                                 for k, v in parent_slots.items())
-                    header += f" ({s})"
-                p_lines.append(header)
+                p_lines.append(format_entity_header(
+                    p_entity['name'], parent_slots or None))
             for o in visible_obs[:3]:
-                p_lines.append(f"- {o}")
+                p_lines.append(f"- {format_observation(o)}")
             if p_lines:
                 pending.append((PRIORITY_USEFUL, "Parent Context",
                                 "\n".join(p_lines)))
@@ -187,16 +191,14 @@ def assemble_context(store: MemoryStore, chain: list[str], tier: int,
             if e["type"] == "person":
                 continue  # people handled above
             obs = store.get_observations(e["id"])
-            visible = [o["text"] for o in obs if o.get("scope") == leaf]
+            visible = [o["text"][:MAX_OBSERVATION_LENGTH]
+                       for o in obs if o.get("scope") == leaf]
             if visible:
                 slots = store.get_slots(e["id"])
-                header = f"**{e['name']}**"
-                if slots:
-                    s = ", ".join(f"{k}: {v}" for k, v in slots.items())
-                    header += f" ({s})"
-                proj_lines.append(f"- {header}")
+                proj_lines.append(
+                    f"- {format_entity_header(e['name'], slots or None)}")
                 for o in visible[:15]:
-                    proj_lines.append(f"  - {o}")
+                    proj_lines.append(f"  - {format_observation(o)}")
         if proj_lines:
             pending.append((PRIORITY_MUST, "Project Context",
                             "\n".join(proj_lines)))
@@ -217,9 +219,8 @@ def assemble_context(store: MemoryStore, chain: list[str], tier: int,
                         continue  # already in Project Context
                     entity = view.get_entity(e["name"])
                     if entity and entity["slots"]:
-                        s = ", ".join(f"{k}: {v}"
-                                      for k, v in entity["slots"].items())
-                        lines.append(f"- **{e['name']}** ({s})")
+                        lines.append(
+                            f"- {format_entity_header(e['name'], entity['slots'])}")
                 if lines:
                     prio = PRIORITY_NICE if is_topic else PRIORITY_USEFUL
                     pending.append((prio, f"{etype.title()}s",
@@ -276,7 +277,7 @@ def assemble_context(store: MemoryStore, chain: list[str], tier: int,
                 remaining -= len(section)
 
     result = "\n\n".join(sections)
-    return result[:budget] if len(result) > budget else result
+    return apply_budget(result, budget)
 
 
 def _load_vault_tasks(chain: list[str], vault_projects_dir: Path,

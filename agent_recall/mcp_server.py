@@ -8,6 +8,7 @@ Usage in MCP config:
     "command": "python3",
     "args": ["-m", "agent_recall.mcp_server"]
 """
+import atexit
 import json
 import os
 from pathlib import Path
@@ -27,11 +28,20 @@ from agent_recall.config import load_config
 bridge: MCPBridge | None = None
 
 
+def _cleanup_bridge() -> None:
+    if bridge is not None:
+        bridge.close()
+
+
+atexit.register(_cleanup_bridge)
+
+
 def _bridge() -> MCPBridge:
     global bridge
     if bridge is None:
         config = load_config()
-        slug = os.environ.get("AGENT_RECALL_SLUG") or Path.cwd().name
+        from agent_recall.context_gen.cache import _sanitize_slug
+        slug = _sanitize_slug(os.environ.get("AGENT_RECALL_SLUG") or Path.cwd().name)
         agent = config.get_agent(slug)
         scope = agent.chain[-1] if agent.chain else "global"
         scope_reads = agent.agent_type != "orchestrator"
@@ -113,9 +123,9 @@ def delete_observations(deletions: list[dict]) -> str:
 
 
 @mcp.tool()
-def read_graph() -> str:
+def read_graph(limit: int = 1000) -> str:
     """Read the full knowledge graph. Use sparingly — prefer search_nodes for targeted lookups."""
-    return json.dumps(_bridge().read_graph(), ensure_ascii=False)
+    return json.dumps(_bridge().read_graph(limit=limit), ensure_ascii=False)
 
 
 @mcp.tool()

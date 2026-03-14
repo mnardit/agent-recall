@@ -269,7 +269,7 @@ def _parse_config(config_path: Path) -> MemoryConfig:
     tiers: dict[int, list[str]] = {}
     for tier_key, slugs in data.get("tiers", {}).items():
         try:
-            tiers[int(tier_key)] = slugs
+            tiers[int(tier_key)] = slugs if isinstance(slugs, list) else []
         except (ValueError, TypeError):
             raise ValueError(
                 f"Invalid tier key {tier_key!r} in {config_path}: must be an integer"
@@ -277,7 +277,7 @@ def _parse_config(config_path: Path) -> MemoryConfig:
 
     agent_types: dict[str, list[str]] = {}
     for type_name, slugs in data.get("agent_types", {}).items():
-        agent_types[type_name] = slugs
+        agent_types[type_name] = slugs if isinstance(slugs, list) else []
 
     briefing = data.get("briefing", {})
 

@@ -133,7 +133,7 @@ def test_post_tool_use_ignores_read_tools(seeded_config):
     stdin_data = json.dumps({"tool_name": "mcp__memory__read_graph"})
     with patch("agent_recall.hooks.load_config", return_value=config), \
          patch("sys.stdin", StringIO(stdin_data)), \
-         patch("agent_recall.hooks.generate_vault") as mock_gen:
+         patch("agent_recall.contrib.vault_gen.generate_vault") as mock_gen:
         from agent_recall.hooks import post_tool_use_hook
         post_tool_use_hook()
     mock_gen.assert_not_called()
@@ -196,13 +196,14 @@ def test_invalidate_from_tool_input_scope(adaptive_config, monkeypatch, tmp_path
     assert (adaptive_config.cache_dir / "acme.stale").exists()
 
 
-def test_invalidate_from_create_entities_observations(adaptive_config, monkeypatch, tmp_path):
-    """Scopes extracted from create_entities observations field."""
+def test_invalidate_from_create_entities_uses_slug_not_obs(adaptive_config, monkeypatch, tmp_path):
+    """Observations are plain strings in MCP — scope comes from agent slug, not per-observation dicts."""
     cwd = tmp_path / "acme"
     cwd.mkdir()
     monkeypatch.chdir(cwd)
 
     _seed_cache(adaptive_config.cache_dir, "proj-a")
+    _seed_cache(adaptive_config.cache_dir, "acme")
     _seed_cache(adaptive_config.cache_dir, "boss")
 
     data = {
@@ -210,13 +211,16 @@ def test_invalidate_from_create_entities_observations(adaptive_config, monkeypat
         "tool_input": {
             "entities": [
                 {"name": "Alice", "entityType": "person",
-                 "observations": [{"text": "Dev", "scope": "proj-a"}]},
+                 "observations": ["Dev at proj-a"]},
             ]
         },
     }
     _invalidate_affected_agents(data, adaptive_config)
 
-    assert (adaptive_config.cache_dir / "proj-a.stale").exists()
+    # Scope from observation dicts is NOT extracted (observations are plain strings)
+    assert not (adaptive_config.cache_dir / "proj-a.stale").exists()
+    # Agent slug (from CWD) IS used — "acme" gets invalidated
+    assert (adaptive_config.cache_dir / "acme.stale").exists()
 
 
 def test_session_start_stale_regen_adaptive(seeded_config, capsys):

@@ -7,14 +7,18 @@ from agent_recall.store import MemoryStore
 from agent_recall.config import MemoryConfig
 from agent_recall.context_gen import (
     BUILTIN_TEMPLATES,
-    load_template, build_prompt,
+    get_template, load_template, list_templates, build_prompt,
     is_cache_fresh, get_cache_path, read_cache,
     invalidate_cache, clear_stale_marker, scope_to_agents,
     get_agent_status, get_all_statuses, get_generation_logs, LLMResult,
-    _load_context_files, _discover_project_files,
-    _assemble_orchestrator_context, _assemble_topic_context,
     generate_briefing, generate_all,
     DEFAULT_OUTPUT_BUDGET,
+)
+from agent_recall.context_gen.files import (
+    _load_context_files, _discover_project_files,
+)
+from agent_recall.context_gen.assembly import (
+    _assemble_orchestrator_context, _assemble_topic_context,
 )
 
 
@@ -84,6 +88,104 @@ def test_load_template_fallback_to_builtin(tmp_path):
 def test_load_template_unknown_type():
     template = load_template("nonexistent_type")
     assert template == BUILTIN_TEMPLATES["personal"]
+
+
+# --- get_template ---
+
+def test_get_template_builtin():
+    """get_template returns builtin template by type name."""
+    template = get_template("client")
+    assert template == BUILTIN_TEMPLATES["client"]
+    assert "{slug}" in template
+
+
+def test_get_template_file_override(tmp_path):
+    """File in templates_dir overrides the builtin."""
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
+    (templates_dir / "client.md").write_text("Custom client: {slug} {raw_context} {budget}")
+    template = get_template("client", templates_dir)
+    assert template == "Custom client: {slug} {raw_context} {budget}"
+
+
+def test_get_template_unknown_falls_back_to_personal():
+    """Unknown type falls back to personal with a warning."""
+    template = get_template("nonexistent_type_xyz")
+    assert template == BUILTIN_TEMPLATES["personal"]
+
+
+def test_get_template_unknown_logs_warning(caplog):
+    """Unknown type emits a warning log."""
+    import logging
+    with caplog.at_level(logging.WARNING, logger="agent_recall.context_gen.templates"):
+        get_template("totally_unknown")
+    assert "totally_unknown" in caplog.text
+    assert "falling back" in caplog.text.lower()
+
+
+def test_get_template_path_traversal_rejected(tmp_path):
+    """Path traversal in agent_type is rejected (stays on builtin)."""
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
+    # Create a file outside templates_dir
+    (tmp_path / "secret.md").write_text("SHOULD NOT BE LOADED")
+    template = get_template("../secret", templates_dir)
+    # Should fall back to personal (unknown type), not read the file
+    assert "SHOULD NOT BE LOADED" not in template
+    assert template == BUILTIN_TEMPLATES["personal"]
+
+
+# --- list_templates ---
+
+def test_list_templates_builtin_only():
+    """Without templates_dir, returns all builtin types sorted."""
+    names = list_templates()
+    assert names == sorted(BUILTIN_TEMPLATES.keys())
+    assert "client" in names
+    assert "personal" in names
+    assert "orchestrator" in names
+
+
+def test_list_templates_with_file_override(tmp_path):
+    """File templates appear in the list alongside builtins."""
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
+    (templates_dir / "client.md").write_text("override")
+    names = list_templates(templates_dir)
+    # client appears once (not duplicated)
+    assert names.count("client") == 1
+    assert "client" in names
+
+
+def test_list_templates_with_new_file_type(tmp_path):
+    """A file-only template type is included in the list."""
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
+    (templates_dir / "custom-new.md").write_text("brand new template")
+    names = list_templates(templates_dir)
+    assert "custom-new" in names
+    # All builtins still present
+    for builtin_name in BUILTIN_TEMPLATES:
+        assert builtin_name in names
+
+
+def test_list_templates_ignores_non_md_files(tmp_path):
+    """Non-.md files in templates_dir are ignored."""
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
+    (templates_dir / "notes.txt").write_text("not a template")
+    (templates_dir / "data.json").write_text("{}")
+    names = list_templates(templates_dir)
+    assert "notes" not in names
+    assert "data" not in names
+
+
+def test_list_templates_empty_dir(tmp_path):
+    """Empty templates_dir returns only builtins."""
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
+    names = list_templates(templates_dir)
+    assert names == sorted(BUILTIN_TEMPLATES.keys())
 
 
 # --- Prompt building ---
@@ -885,26 +987,26 @@ def test_llm_result_backward_compat(tmp_path, config):
 
 def test_get_default_caller_cli(config):
     """Default backend is cli."""
-    from agent_recall.context_gen import _get_default_caller, _cli_llm_caller
+    from agent_recall.context_gen.llm import _get_default_caller, _cli_llm_caller
     assert _get_default_caller(config) is _cli_llm_caller
 
 
 def test_get_default_caller_api(config):
     """backend: api returns API caller."""
-    from agent_recall.context_gen import _get_default_caller, _api_llm_caller
+    from agent_recall.context_gen.llm import _get_default_caller, _api_llm_caller
     config.briefing["backend"] = "api"
     assert _get_default_caller(config) is _api_llm_caller
 
 
 def test_get_default_caller_no_config():
     """No config defaults to cli."""
-    from agent_recall.context_gen import _get_default_caller, _cli_llm_caller
+    from agent_recall.context_gen.llm import _get_default_caller, _cli_llm_caller
     assert _get_default_caller(None) is _cli_llm_caller
 
 
 def test_resolve_model_aliases():
     """Model aliases resolve to full API IDs."""
-    from agent_recall.context_gen import _resolve_model
+    from agent_recall.context_gen.llm import _resolve_model
     assert _resolve_model("opus") == "claude-opus-4-6"
     assert _resolve_model("sonnet") == "claude-sonnet-4-6"
     assert _resolve_model("haiku") == "claude-haiku-4-5-20251001"

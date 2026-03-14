@@ -22,7 +22,6 @@ from agent_recall.context_gen import (
     clear_stale_marker, invalidate_cache, scope_to_agents,
 )
 from agent_recall.store import MemoryStore
-from agent_recall.vault_gen import generate_vault
 
 
 # --- SessionStart Hook ---
@@ -45,7 +44,8 @@ def session_start_hook() -> None:
             return
 
         # Check for stale cache — regenerate if adaptive mode enabled
-        stale_path = config.cache_dir / f"{slug}.stale"
+        from agent_recall.context_gen.cache import _sanitize_slug
+        stale_path = config.cache_dir / f"{_sanitize_slug(slug)}.stale"
         if stale_path.exists():
             min_age = config.briefing.get("min_cache_age", 1800)
             cache_path = get_cache_path(slug, config.cache_dir)
@@ -128,14 +128,9 @@ def post_tool_use_hook() -> None:
     if not config.vault_dir or not config.vault_dir.exists():
         return
 
-    # Rate limit
     _tmpdir = Path(tempfile.gettempdir())
     rate_file = _tmpdir / "agent-recall-vault-regen-last"
     rate_seconds = 300
-    if rate_file.exists():
-        last = rate_file.stat().st_mtime
-        if time.time() - last < rate_seconds:
-            return
 
     # Acquire exclusive lock (non-blocking) — skip locking on Windows
     lock_file = _tmpdir / "agent-recall-vault-regen.lock"
@@ -152,12 +147,19 @@ def post_tool_use_hook() -> None:
             return
 
     try:
-        rate_file.write_text(str(time.time()))
+        # Rate limit check inside lock to prevent TOCTOU race
+        if rate_file.exists():
+            last = rate_file.stat().st_mtime
+            if time.time() - last < rate_seconds:
+                return
+
+        from agent_recall.contrib.vault_gen import generate_vault
         store = MemoryStore(config.db_path)
         try:
             generate_vault(store, config.vault_dir)
         finally:
             store.close()
+        rate_file.write_text(str(time.time()))
     finally:
         if fcntl is not None and lock_fd is not None:
             fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
@@ -166,7 +168,7 @@ def post_tool_use_hook() -> None:
 
     # Auto-commit if enabled
     if config.vault_auto_commit:
-        from agent_recall.vault_gen import _git_auto_commit
+        from agent_recall.contrib.vault_gen import _git_auto_commit
         _git_auto_commit(config.vault_dir)
 
 
@@ -191,29 +193,39 @@ def _invalidate_affected_agents(data: dict, config: "MemoryConfig") -> None:
         except (json.JSONDecodeError, TypeError):
             tool_input = {}
 
-    scopes: set[str] = set()
-
-    # Current agent's scope (CWD name)
+    # Get the calling agent's scope chain for validation
+    slug = os.environ.get("AGENT_RECALL_SLUG") or ""
     try:
-        scopes.add(Path.cwd().name)
+        if not slug:
+            slug = Path.cwd().name
     except Exception:
         pass
+    # Only validate scopes for explicitly configured agents
+    known_agents = set(config.all_agents())
+    agent = config.get_agent(slug) if slug else None
+    enforce_scope = slug in known_agents
+    allowed_scopes: set[str] = set()
+    if agent and enforce_scope:
+        allowed_scopes = set(agent.chain)
+        # Include children from hierarchy — parents can invalidate children
+        for scope in list(allowed_scopes):
+            allowed_scopes |= config.scope_children(scope)
 
-    # Extract scopes from tool_input — MCP tools pass scope in various fields
+    scopes: set[str] = set()
+
+    # Current agent's scope (from slug, not CWD)
+    if slug:
+        scopes.add(slug)
+
+    # Extract scopes from tool_input — but only accept scopes in agent's chain.
+    # Note: MCP tools send observations as plain strings, not dicts with scope fields.
+    # Scope is set at the MCPBridge level (default_scope), not per-observation.
+    # We only check the top-level "scope" field which some tools do pass directly.
     if isinstance(tool_input, dict):
-        # Direct scope field (add_observations, set_slot)
         if "scope" in tool_input:
-            scopes.add(tool_input["scope"])
-        # Entities list (create_entities) — each may have observations with scope
-        for entity in tool_input.get("entities", []):
-            if isinstance(entity, dict):
-                for obs in entity.get("observations", []):
-                    if isinstance(obs, dict) and "scope" in obs:
-                        scopes.add(obs["scope"])
-        # Observations list (add_observations)
-        for obs in tool_input.get("observations", []):
-            if isinstance(obs, dict) and "scope" in obs:
-                scopes.add(obs["scope"])
+            candidate = tool_input["scope"]
+            if not allowed_scopes or candidate in allowed_scopes:
+                scopes.add(candidate)
 
     # Map scopes to affected agents and invalidate
     affected: set[str] = set()

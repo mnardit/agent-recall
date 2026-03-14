@@ -4,7 +4,9 @@ Single DB with scope column on slots for hierarchical filtering.
 Tables: entities, slots (bitemporal+scoped), observations, relations, log_entries, documents.
 """
 import json
+import os
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -12,18 +14,23 @@ from pathlib import Path
 class _Transaction:
     """Context manager that wraps store operations in a single SQLite transaction."""
 
-    def __init__(self, conn: sqlite3.Connection) -> None:
-        self._conn = conn
+    def __init__(self, store: "MemoryStore") -> None:
+        self._store = store
+        self._conn = store._conn
 
     def __enter__(self) -> "_Transaction":
         self._conn.execute("BEGIN IMMEDIATE")
+        self._store._in_transaction = True
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        if exc_type is None:
-            self._conn.commit()
-        else:
-            self._conn.rollback()
+        try:
+            if exc_type is None:
+                self._conn.commit()
+            else:
+                self._conn.rollback()
+        finally:
+            self._store._in_transaction = False
 
 
 class MemoryStore:
@@ -51,12 +58,21 @@ class MemoryStore:
             from agent_recall.config import DEFAULT_DB_PATH
             db_path = DEFAULT_DB_PATH
         self.db_path = Path(db_path)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         self._conn = sqlite3.connect(str(self.db_path), timeout=timeout)
+        if self.db_path.exists():
+            os.chmod(str(self.db_path), 0o600)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
+        self._in_transaction = False
         self._init_tables()
+        self._run_migrations()
+
+    def _run_migrations(self) -> None:
+        """Apply any pending schema migrations."""
+        from agent_recall.migrations import run_migrations
+        run_migrations(self._conn)
 
     def _init_tables(self) -> None:
         self._conn.executescript("""
@@ -137,6 +153,84 @@ class MemoryStore:
             );
         """)
         self._conn.commit()
+        self._init_fts()
+
+    def _init_fts(self) -> None:
+        """Create FTS5 virtual tables and sync triggers if FTS5 is available."""
+        try:
+            self._conn.executescript("""
+                CREATE VIRTUAL TABLE IF NOT EXISTS entities_fts USING fts5(
+                    name,
+                    content=entities,
+                    content_rowid=id,
+                    tokenize='porter unicode61'
+                );
+
+                CREATE VIRTUAL TABLE IF NOT EXISTS observations_fts USING fts5(
+                    text,
+                    content=observations,
+                    content_rowid=id,
+                    tokenize='porter unicode61'
+                );
+
+                -- Triggers to keep entities_fts in sync
+                CREATE TRIGGER IF NOT EXISTS entities_ai AFTER INSERT ON entities BEGIN
+                    INSERT INTO entities_fts(rowid, name) VALUES (new.id, new.name);
+                END;
+                CREATE TRIGGER IF NOT EXISTS entities_ad AFTER DELETE ON entities BEGIN
+                    INSERT INTO entities_fts(entities_fts, rowid, name)
+                        VALUES('delete', old.id, old.name);
+                END;
+                CREATE TRIGGER IF NOT EXISTS entities_au AFTER UPDATE ON entities BEGIN
+                    INSERT INTO entities_fts(entities_fts, rowid, name)
+                        VALUES('delete', old.id, old.name);
+                    INSERT INTO entities_fts(rowid, name) VALUES (new.id, new.name);
+                END;
+
+                -- Triggers to keep observations_fts in sync
+                CREATE TRIGGER IF NOT EXISTS observations_ai AFTER INSERT ON observations BEGIN
+                    INSERT INTO observations_fts(rowid, text) VALUES (new.id, new.text);
+                END;
+                CREATE TRIGGER IF NOT EXISTS observations_ad AFTER DELETE ON observations BEGIN
+                    INSERT INTO observations_fts(observations_fts, rowid, text)
+                        VALUES('delete', old.id, old.text);
+                END;
+                CREATE TRIGGER IF NOT EXISTS observations_au AFTER UPDATE ON observations BEGIN
+                    INSERT INTO observations_fts(observations_fts, rowid, text)
+                        VALUES('delete', old.id, old.text);
+                    INSERT INTO observations_fts(rowid, text) VALUES (new.id, new.text);
+                END;
+            """)
+            self._conn.commit()
+            self._has_fts = True
+        except Exception:
+            # FTS5 not available (old SQLite build) — fall back to LIKE
+            self._has_fts = False
+
+    def rebuild_fts(self) -> None:
+        """Repopulate FTS indexes from existing data.
+
+        Call this after upgrading an existing database to add FTS support,
+        or if the FTS index becomes out of sync.
+
+        Raises:
+            RuntimeError: If FTS5 is not available.
+        """
+        if not self._has_fts:
+            raise RuntimeError("FTS5 is not available in this SQLite build")
+        # Use the FTS5 'rebuild' command to reconstruct from content tables
+        self._conn.execute(
+            "INSERT INTO entities_fts(entities_fts) VALUES('rebuild')"
+        )
+        self._conn.execute(
+            "INSERT INTO observations_fts(observations_fts) VALUES('rebuild')"
+        )
+        self._conn.commit()
+
+    @property
+    def has_fts(self) -> bool:
+        """Whether FTS5 full-text search is available."""
+        return self._has_fts
 
     def _now(self) -> str:
         return datetime.now(timezone.utc).isoformat()
@@ -159,7 +253,7 @@ class MemoryStore:
             raise ValueError("Entity name cannot be empty")
         if not entity_type or not entity_type.strip():
             raise ValueError("Entity type cannot be empty")
-        with self._conn:
+        with self._auto_commit():
             cur = self._conn.execute(
                 "INSERT INTO entities (name, type, created_at) VALUES (?, ?, ?)",
                 (name, entity_type, self._now()),
@@ -199,7 +293,7 @@ class MemoryStore:
         """
         if not name or not name.strip():
             raise ValueError("Entity name cannot be empty")
-        with self._conn:
+        with self._auto_commit():
             self._conn.execute(
                 "INSERT OR IGNORE INTO entities (name, type, created_at) VALUES (?, ?, ?)",
                 (name, entity_type, self._now()),
@@ -229,6 +323,8 @@ class MemoryStore:
 
     def list_entities_in_scopes(self, scopes: list[str],
                                 entity_type: str | None = None) -> list[dict]:
+        if not scopes:
+            return []
         placeholders = ",".join("?" * len(scopes))
         type_filter = ""
         type_params: list = []
@@ -304,7 +400,7 @@ class MemoryStore:
         return [dict(r) for r in rows]
 
     def delete_entity(self, entity_id: int) -> None:
-        with self._conn:
+        with self._auto_commit():
             self._conn.execute("DELETE FROM entities WHERE id = ?", (entity_id,))
 
     # --- Slots (scope-aware, bitemporal) ---
@@ -322,7 +418,7 @@ class MemoryStore:
             source: Who set this value (default "agent").
         """
         now = self._now()
-        with self._conn:
+        with self._auto_commit():
             self._conn.execute(
                 "UPDATE slots SET valid_to = ? "
                 "WHERE entity_id = ? AND key = ? AND scope = ? AND valid_to IS NULL",
@@ -385,7 +481,7 @@ class MemoryStore:
     def archive_slot(self, entity_id: int, key: str,
                      scope: str | None = None) -> None:
         now = self._now()
-        with self._conn:
+        with self._auto_commit():
             if scope:
                 self._conn.execute(
                     "UPDATE slots SET valid_to = ? "
@@ -436,7 +532,7 @@ class MemoryStore:
     def add_observation(self, entity_id: int, text: str,
                         scope: str = "global") -> int:
         """Add a free-text observation to an entity. Returns observation ID."""
-        with self._conn:
+        with self._auto_commit():
             cur = self._conn.execute(
                 "INSERT INTO observations (entity_id, text, scope, created_at) "
                 "VALUES (?, ?, ?, ?)",
@@ -461,7 +557,7 @@ class MemoryStore:
         return [dict(r) for r in rows]
 
     def archive_observation(self, observation_id: int) -> None:
-        with self._conn:
+        with self._auto_commit():
             self._conn.execute(
                 "UPDATE observations SET archived_at = ? WHERE id = ?",
                 (self._now(), observation_id),
@@ -469,7 +565,7 @@ class MemoryStore:
 
     def delete_observation_by_text(self, entity_id: int, text: str) -> int:
         """Archive observations matching text. Returns number of rows affected."""
-        with self._conn:
+        with self._auto_commit():
             cur = self._conn.execute(
                 "UPDATE observations SET archived_at = ? "
                 "WHERE entity_id = ? AND text = ? AND archived_at IS NULL",
@@ -482,7 +578,7 @@ class MemoryStore:
     def add_relation(self, from_id: int, to_id: int, rel_type: str,
                      scope: str = "global", context: str | None = None) -> int:
         """Create a directed relation between two entities. Returns relation ID."""
-        with self._conn:
+        with self._auto_commit():
             cur = self._conn.execute(
                 "INSERT INTO relations (from_id, to_id, type, scope, context, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
@@ -491,7 +587,7 @@ class MemoryStore:
         return cur.lastrowid
 
     def archive_relation(self, relation_id: int) -> None:
-        with self._conn:
+        with self._auto_commit():
             self._conn.execute(
                 "UPDATE relations SET status='former', archived_at=? WHERE id=?",
                 (self._now(), relation_id),
@@ -553,6 +649,20 @@ class MemoryStore:
         ).fetchall()
         return [dict(r) for r in outgoing], [dict(r) for r in incoming]
 
+    @contextmanager
+    def _auto_commit(self):
+        """Context manager: no-op inside transaction, BEGIN IMMEDIATE otherwise."""
+        if self._in_transaction:
+            yield
+        else:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                yield
+                self._conn.commit()
+            except BaseException:
+                self._conn.rollback()
+                raise
+
     def transaction(self) -> _Transaction:
         """Context manager for atomic multi-step operations.
 
@@ -565,13 +675,13 @@ class MemoryStore:
                 store.set_slot(eid, "key", "val")
                 store.add_observation(eid, "text")
         """
-        return _Transaction(self._conn)
+        return _Transaction(self)
 
     # --- Log Entries ---
 
     def add_log(self, entity_id: int, text: str, date: str | None = None,
                 author: str = "agent") -> None:
-        with self._conn:
+        with self._auto_commit():
             self._conn.execute(
                 "INSERT INTO log_entries (entity_id, date, text, author, created_at) "
                 "VALUES (?, ?, ?, ?, ?)",
@@ -579,13 +689,15 @@ class MemoryStore:
             )
 
     def get_logs(self, entity_id: int, limit: int | None = None) -> list[dict]:
+        if limit is not None:
+            # Get newest entries, then reverse to chronological order
+            sql = ("SELECT date, text, author, created_at FROM log_entries "
+                   "WHERE entity_id = ? ORDER BY date DESC, id DESC LIMIT ?")
+            rows = self._conn.execute(sql, (entity_id, limit)).fetchall()
+            return [dict(r) for r in reversed(rows)]
         sql = ("SELECT date, text, author, created_at FROM log_entries "
                "WHERE entity_id = ? ORDER BY date, id")
-        params: tuple = (entity_id,)
-        if limit is not None:
-            sql += " LIMIT ?"
-            params = (entity_id, limit)
-        return [dict(r) for r in self._conn.execute(sql, params).fetchall()]
+        return [dict(r) for r in self._conn.execute(sql, (entity_id,)).fetchall()]
 
     # --- Documents ---
 
@@ -593,7 +705,7 @@ class MemoryStore:
                       tags: list[str] | None = None) -> None:
         now = self._now()
         tags_json = json.dumps(tags or [])
-        with self._conn:
+        with self._auto_commit():
             self._conn.execute(
                 "INSERT INTO documents (name, type, content, tags, created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?, ?) "
@@ -632,11 +744,77 @@ class MemoryStore:
     def search(self, query: str, limit: int = 100) -> list[dict]:
         """Full-text search across entity names, slot values, and observations.
 
-        Splits query into words and searches with fuzzy stem matching for long words.
+        Uses FTS5 with Porter stemmer when available (handles word forms
+        like "running" matching "run"). Falls back to LIKE-based search
+        for databases without FTS5 tables.
+
         Returns list of {id, name, type} dicts.
         """
+        if self._has_fts:
+            return self._search_fts(query, limit)
+        return self._search_like(query, limit)
+
+    def _escape_fts(self, term: str) -> str:
+        """Escape a term for FTS5 query syntax.
+
+        Wraps in double quotes to treat special characters as literals.
+        """
+        # Replace double quotes inside the term
+        return '"' + term.replace('"', '""') + '"'
+
+    def _search_fts(self, query: str, limit: int) -> list[dict]:
+        """FTS5-based search with Porter stemming."""
         found: dict[int, dict] = {}
-        # Split into words, search each; for long words also try stem
+        words = query.split()
+        if not words:
+            words = [query]
+
+        # Build FTS5 query: each word as a separate term with OR
+        fts_terms = [self._escape_fts(w) for w in words if w.strip()]
+        if not fts_terms:
+            return []
+        fts_query = " OR ".join(fts_terms)
+
+        # Search entity names via FTS
+        for r in self._conn.execute(
+            "SELECT e.id, e.name, e.type FROM entities e "
+            "JOIN entities_fts f ON e.id = f.rowid "
+            "WHERE entities_fts MATCH ? LIMIT ?",
+            (fts_query, limit),
+        ).fetchall():
+            found[r["id"]] = dict(r)
+
+        # Search observations via FTS (only non-archived)
+        if len(found) < limit:
+            for r in self._conn.execute(
+                "SELECT DISTINCT e.id, e.name, e.type FROM entities e "
+                "JOIN observations o ON e.id = o.entity_id "
+                "JOIN observations_fts f ON o.id = f.rowid "
+                "WHERE observations_fts MATCH ? "
+                "AND o.archived_at IS NULL LIMIT ?",
+                (fts_query, limit),
+            ).fetchall():
+                found[r["id"]] = dict(r)
+
+        # Slot values are not in FTS — fall back to LIKE for slots
+        if len(found) < limit:
+            for word in words:
+                if len(found) >= limit:
+                    break
+                pattern = f"%{self._escape_like(word)}%"
+                for r in self._conn.execute(
+                    "SELECT DISTINCT e.id, e.name, e.type FROM entities e "
+                    "JOIN slots s ON e.id = s.entity_id "
+                    "WHERE s.value LIKE ? ESCAPE '\\' AND s.valid_to IS NULL LIMIT ?",
+                    (pattern, limit),
+                ).fetchall():
+                    found[r["id"]] = dict(r)
+
+        return list(found.values())[:limit]
+
+    def _search_like(self, query: str, limit: int) -> list[dict]:
+        """LIKE-based fallback search for databases without FTS5."""
+        found: dict[int, dict] = {}
         words = query.split()
         if not words:
             words = [query]
@@ -818,7 +996,7 @@ class MemoryStore:
         if old == "global":
             raise ValueError("Cannot rename the global scope")
         counts = {}
-        with self._conn:
+        with self._auto_commit():
             cur = self._conn.execute(
                 "UPDATE slots SET scope = ? WHERE scope = ? AND valid_to IS NULL",
                 (new, old),

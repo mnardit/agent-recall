@@ -7,63 +7,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
-- **FTS5 full-text search** — Porter stemmer tokenizer for entity and observation search. Automatic fallback to LIKE-based search if FTS5 unavailable. `rebuild_fts()` method for upgrading existing databases
-- **Schema migration system** — `migrations.py` with versioned, atomic migrations. Auto-runs on database open. New databases stamped to latest version
-- **Claude Code Plugin packaging** — `.claude-plugin/plugin.json`, `.mcp.json`, `hooks/hooks.json`. Install with `/plugins add mnardit/agent-recall` instead of manual config
-- **Explicit `scope_chain` in agents config** — `agents.<slug>.scope_chain` overrides inferred chain from hierarchy/tiers
-- **`database` alias for `db_path`** — config accepts both `db_path` and `database` keys
-- **Input size limits on MCP boundary** — entity names (500 chars), observations (10K chars), entity types (50 chars), list items (100 per call)
-- **Search DoS protection** — query length cap (500 chars), word count cap (20), result limit cap (100)
-- **`read_graph` pagination** — accepts `limit` parameter (default 1000)
-- **Prompt injection mitigation** — observations in all context paths wrapped in `<observation>` tags with length cap (2000 chars). Prompt header warns LLM to treat tagged content as data only
-- **CLI `observe` command** — add observations from command line: `agent-recall observe "Alice" "New fact"`
-- **CLI `delete` command** — delete entities from command line: `agent-recall delete "Alice"`
-- **CLI `templates` command** — list available briefing template types with source (builtin/file)
-- **Unified template API** — `get_template()` resolves templates from file overrides → builtins → default fallback. `list_templates()` returns all available types
-- **Shared context helpers** — `context_helpers.py` with `format_observation()`, `format_entity_header()`, `format_slots()` etc. used by all 3 assembly paths
-- **Architecture documentation** — `docs/architecture.md` covering config resolution order and scope enforcement boundary
-- **Quick Start section** in README
-- **Auto-memory comparison table** in README (agent-recall vs Claude Code auto-memory)
+- **Full-text search (FTS5)** with Porter stemmer. Falls back to LIKE if FTS5 is unavailable. Use `rebuild_fts()` to index existing databases
+- **Schema migrations** — versioned, atomic, run automatically on DB open
+- **Claude Code Plugin** — install with `/plugins add mnardit/agent-recall`
+- **CLI commands:** `observe`, `delete`, `templates`
+- **Explicit `scope_chain`** in per-agent config (overrides inferred chain)
+- **`database` config alias** for `db_path`
+- Architecture docs (`docs/architecture.md`), Quick Start and auto-memory comparison in README
 
 ### Fixed
-- **`_auto_commit()` atomicity** — write operations like `set_slot` (UPDATE+INSERT) were not atomic outside explicit transactions. Now uses `BEGIN IMMEDIATE` for all write paths
-- **`_Transaction.__exit__` flag ordering** — `_in_transaction` flag was cleared before commit/rollback, leaving wrong state if commit raised
-- **`get_agent()` ignored explicit `scope_chain`** — agents config `scope_chain` was parsed but never used; agents always got inferred chains
-- **`merge_entities()` transaction nesting** — `BEGIN IMMEDIATE` inside `with self._conn` broke atomicity; partial merges were possible. Uses `_in_transaction` flag to prevent nested transactions
-- **Orchestrator context type hijack** — `create_entities(name=slug, entityType="topic")` could silently downgrade orchestrator briefing template. Now skips topic override for configured orchestrators
-- **`get_logs()` returned oldest entries with limit** — `ORDER BY date, id LIMIT N` returned first N instead of last N. Now returns newest N in chronological order
-- **Cross-scope relation injection** — `create_relations()` OR-logic allowed creating relations to foreign entities. Now requires source entity to be writable
-- **Cache invalidation DoS** — `PostToolUse` hook accepted fabricated scope values for cache invalidation. Now validates scopes against agent's own chain
-- **`list_entities_in_scopes()` crash with empty list** — `WHERE scope IN ()` generated invalid SQL
-- **`read_graph()` duplicate relations** — relations appeared multiple times in results
-- **Non-string observations crash** — `create_entities()` and `add_observations()` now validate observation type and length consistently
-- **MCP silent truncation** — all methods that cap input at 100 items now report truncation in `blocked` list
-- **"SCOPE VIOLATION" wording** — replaced alarming language with neutral "Write blocked" / "Blocked" messages
-- **PostToolUse hook rate-limit race** — lock is now acquired before rate-limit check (was after)
-- **Vault `_safe_filename` collision** — `Path.name` stripped directory components causing name collisions. Now replaces unsafe chars instead
-- **CLI error messages** — "Not found" errors now include the entity name
-- **API LLM caller crash on empty response** — `resp.content[0]` guarded with length check
-- **Config validation** — `tiers` and `agent_types` values validated as lists at parse time
+- **Write atomicity** — `set_slot` and similar writes are now wrapped in `BEGIN IMMEDIATE` outside explicit transactions
+- **Transaction flag ordering** — `_in_transaction` cleared after commit/rollback, not before
+- **`get_agent()` ignored explicit `scope_chain`** from config
+- **`merge_entities()` partial merges** — nested `BEGIN IMMEDIATE` broke atomicity
+- **Orchestrator template hijack** — `create_entities(name=slug, entityType="topic")` no longer downgrades orchestrator briefings
+- **`get_logs()` returned oldest N** instead of newest N
+- **Cross-scope relation injection** — source entity must now be writable
+- **Cache invalidation** accepted fabricated scope values; now validates against agent's chain
+- **`list_entities_in_scopes([])`** generated invalid SQL
+- **`read_graph()` duplicate relations**
+- **Non-string observations** now validated consistently
+- **Silent truncation** — methods that cap at 100 items now report it
+- Softer error wording ("Write blocked" instead of "SCOPE VIOLATION")
+- Hook rate-limit race condition, vault filename collisions, CLI error messages, API caller crash on empty response, config list validation
 
 ### Changed
-- **`context_gen.py` refactored into package** — split 1047-line module into `context_gen/` with 7 submodules (cache, templates, llm, files, assembly, generator). All imports backward compatible
-- **`vault_gen` and `dedup` moved to `contrib/`** — production-only modules relocated to `agent_recall.contrib`
-- **Removed deprecated shims** — `agent_recall.dedup` and `agent_recall.vault_gen` top-level re-export modules removed (use `agent_recall.contrib.*` instead)
-- **Removed `default_llm_caller`** — deprecated function removed. Use `_get_default_caller(config)` pattern instead
-- **Cleaned `context_gen` public API** — private symbols no longer re-exported from `context_gen.__init__`
-- **Lazy vault_gen import** — `hooks.py` imports vault_gen inside function body, not at module level
-- **MCP server cleanup** — bridge singleton registered with `atexit` for proper connection cleanup
-- **File permissions** — `mkdir(mode=0o700)` for database directory, `chmod(0o600)` on database file after creation
-- **GitHub Actions pinned to commit SHAs** — prevents supply chain attacks via mutable tags
+- **`context_gen` split into package** — 7 submodules, all imports backward compatible
+- **`vault_gen` and `dedup` moved to `contrib/`** — import from `agent_recall.contrib.*`
+- Deprecated `default_llm_caller` and top-level `dedup`/`vault_gen` shims removed
+- DB file permissions set to `0o600`, directory to `0o700`
+- GitHub Actions pinned to commit SHAs
+- MCP bridge registered with `atexit` for cleanup
 
 ### Security
-- **Observation XML escaping** — `format_observation()` now escapes `&`, `<`, `>` before wrapping in `<observation>` tags, preventing prompt injection via tag boundary escape
-- **Slug path traversal** — slug values sanitized (`[^a-zA-Z0-9_-]` → `_`) before use in cache file paths, preventing directory traversal via `AGENT_RECALL_SLUG`
-- **Path traversal in `load_template()`** — `agent_type` with `../` could read arbitrary files. Added `is_relative_to()` check
-- **Path validation for `context_files`** — `allowed_bases` always enforced (falls back to db_path parent + HOME when project_dir is None)
-- **MCP DoS caps on all methods** — `create_relations`, `delete_relations`, `delete_observations`, `delete_entities` now enforce `MAX_ITEMS_PER_CALL=100`
-- **Relation type length limit** — `MAX_RELATION_TYPE=200` prevents storage of oversized relation types
-- **`read_graph` relation cap** — `MAX_RELATIONS=5000` prevents unbounded relation output
+- **Prompt injection** — observations XML-escaped (`&`, `<`, `>`) before wrapping in `<observation>` tags
+- **Path traversal** — slugs sanitized in cache paths; `load_template()` validates `is_relative_to()`; `context_files` always checks `allowed_bases`
+- **MCP input limits** — all 6 write methods capped at 100 items per call; relation type max 200 chars; `read_graph` relations capped at 5000
 
 ## [0.3.0] - 2026-02-27
 

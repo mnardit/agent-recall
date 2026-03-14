@@ -68,24 +68,7 @@ Other memory solutions exist (Mem0, Zep/Graphiti, LangMem). Here's what makes ag
 
 ## Setup
 
-### Option A: Claude Code Plugin (recommended)
-
-```bash
-pip install 'agent-recall[mcp]'
-agent-recall init
-```
-
-Then in Claude Code:
-
-```
-/plugins add mnardit/agent-recall
-```
-
-This installs the MCP server and hooks automatically — no manual config needed.
-
-### Option B: Manual setup
-
-#### Step 1: Install
+### Step 1: Install
 
 ```bash
 pip install 'agent-recall[mcp]'
@@ -494,6 +477,9 @@ agent-recall log Alice "Update" --author human  # Log with custom author
 agent-recall logs Alice                    # Show log entries
 agent-recall generate my-agent --force     # Generate AI briefing
 agent-recall refresh --force               # Refresh all briefings
+agent-recall observe Alice "Prefers async"   # Add observation to entity
+agent-recall delete Alice                    # Delete entity
+agent-recall templates                       # List briefing templates
 agent-recall rename-scope old-name new-name  # Migrate data between scopes
 ```
 

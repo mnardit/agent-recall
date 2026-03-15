@@ -43,6 +43,11 @@ class MCPBridge:
     MAX_RELATION_TYPE = 200
     MAX_RELATIONS = 5000
 
+    #: Entity types protected from deletion via MCP tools.
+    #: These are typically infrastructure entities managed by external systems
+    #: (dashboards, config stores) that should not be removed by agents.
+    PROTECTED_TYPES: set[str] = frozenset({"agent", "section", "config"})
+
     def __init__(self, db_path: Path | str, default_scope: str = "global",
                  scope_chain: list[str] | None = None,
                  config: MemoryConfig | None = None,
@@ -220,7 +225,12 @@ class MCPBridge:
         return {"added": added, "blocked": blocked}
 
     def delete_entities(self, names: list[str]) -> dict:
-        """Delete entities by name. Returns {deleted: int, blocked: list}."""
+        """Delete entities by name. Returns {deleted: int, blocked: list}.
+
+        Entities whose type is in :attr:`PROTECTED_TYPES` (agent, section,
+        config) are blocked from deletion — these are infrastructure entities
+        managed by external systems.
+        """
         blocked: list[str] = []
         if len(names) > self.MAX_ITEMS_PER_CALL:
             blocked.append(f"Input truncated: {len(names)} items exceeds limit of {self.MAX_ITEMS_PER_CALL}")
@@ -230,6 +240,13 @@ class MCPBridge:
             entity_id = self._store.find_entity(name)
             if entity_id is None:
                 blocked.append(f"Entity not found: '{name}'")
+                continue
+            entity = self._store.get_entity(entity_id)
+            if entity and entity["type"] in self.PROTECTED_TYPES:
+                blocked.append(
+                    f"Cannot delete '{name}': type '{entity['type']}' is "
+                    f"protected. Remove via direct DB access if intended."
+                )
                 continue
             ok, reason = self._entity_writable(entity_id)
             if not ok:

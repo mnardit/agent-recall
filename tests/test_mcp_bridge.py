@@ -98,6 +98,28 @@ def test_delete_entities_nonexistent(bridge):
     assert any("Ghost" in b for b in result["blocked"])
 
 
+def test_delete_entities_protected_types(bridge):
+    """Protected entity types (agent, section, config) cannot be deleted via MCP."""
+    for etype in ("agent", "section", "config"):
+        bridge.create_entities([{"name": f"Test-{etype}", "entityType": etype}])
+    # Try deleting all three
+    result = bridge.delete_entities(["Test-agent", "Test-section", "Test-config"])
+    assert result["deleted"] == 0
+    assert len(result["blocked"]) == 3
+    assert all("protected" in b for b in result["blocked"])
+    # Verify entities still exist
+    for etype in ("agent", "section", "config"):
+        assert bridge.open_nodes([f"Test-{etype}"]) != []
+
+
+def test_delete_entities_unprotected_allowed(bridge):
+    """Non-protected types (person, client, project, etc.) can still be deleted."""
+    bridge.create_entities([{"name": "TempPerson", "entityType": "person"}])
+    result = bridge.delete_entities(["TempPerson"])
+    assert result["deleted"] == 1
+    assert bridge.open_nodes(["TempPerson"]) == []
+
+
 def test_delete_relations(bridge):
     bridge.create_entities([
         {"name": "Alice", "entityType": "person"},

@@ -1,6 +1,1 @@
-{
-  "memory": {
-    "command": "python3",
-    "args": ["-m", "agent_recall.mcp_server"]
-  }
-}
+{"mcpServers":{}}

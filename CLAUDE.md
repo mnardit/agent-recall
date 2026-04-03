@@ -15,7 +15,7 @@ HN + Reddit посты опубликованы 26.02.2026.
 
 ### Пакет
 
-**Repo:** `~/projects/personal/claude-memory/` → github.com/mnardit/agent-recall (PUBLIC)
+**Repo:** `~/projects/claude-memory/` → github.com/mnardit/agent-recall (PUBLIC)
 **PyPI:** `agent-recall` / `agent-recall[mcp]` / `agent-recall[api]`
 **Module:** `agent_recall` | **CLI:** `agent-recall init/set/get/search/generate/status`
 
@@ -73,7 +73,7 @@ CC имеет `~/.claude/projects/<project>/memory/` (auto memory, MEMORY.md 200
 
 ### Файлы
 
-- `~/projects/personal/claude-memory/` — пакет (directory name unchanged)
+- `~/projects/claude-memory/` — пакет (directory name unchanged)
 - `docs/plans/2026-02-16-agent-memory-launch-strategy.md` — стратегия запуска
 - `~/projects/bigboss/lib/memory/` — production re-export wrappers
 - `~/projects/bigboss/memory.yaml` — production конфиг

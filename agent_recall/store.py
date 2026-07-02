@@ -59,13 +59,28 @@ class MemoryStore:
             db_path = DEFAULT_DB_PATH
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self._conn = sqlite3.connect(str(self.db_path), timeout=timeout)
+        self._conn = sqlite3.connect(str(self.db_path), timeout=timeout,
+                                      check_same_thread=False)
         if self.db_path.exists():
             os.chmod(str(self.db_path), 0o600)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA wal_autocheckpoint=100")  # 防WAL堆积 400KB自检
         self._conn.execute("PRAGMA foreign_keys=ON")
+        # ponytail: SQLite perf — cache 64MB + mmap 256MB + mem temp store
+        self._conn.execute("PRAGMA cache_size = -64000")
+        self._conn.execute("PRAGMA mmap_size = 268435456")
+        self._conn.execute("PRAGMA temp_store = MEMORY")
+        # Enable extension loading for sqlite-vec (Windows requires this)
+        try:
+            self._conn.enable_load_extension(True)
+            import sqlite_vec
+            sqlite_vec.load(self._conn)
+        except Exception:
+            pass
         self._in_transaction = False
+        self._write_count = 0
+        self._last_rebalance = datetime.now(timezone.utc)
         self._init_tables()
         self._run_migrations()
 
@@ -112,6 +127,9 @@ class MemoryStore:
             );
             CREATE INDEX IF NOT EXISTS idx_obs_entity
                 ON observations(entity_id) WHERE archived_at IS NULL;
+            CREATE INDEX IF NOT EXISTS idx_obs_created_at ON observations(created_at);
+            CREATE INDEX IF NOT EXISTS idx_obs_entity_scope
+                ON observations(entity_id, scope) WHERE archived_at IS NULL;
 
             CREATE TABLE IF NOT EXISTS relations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -150,6 +168,92 @@ class MemoryStore:
                 tags TEXT DEFAULT '[]',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
+            );
+
+            -- ═══════════════════════════════════════
+            -- v0.5.0: Knowledge lifecycle tables
+            -- ═══════════════════════════════════════
+
+            CREATE TABLE IF NOT EXISTS knowledge_tiers (
+                observation_id INTEGER PRIMARY KEY,
+                tier TEXT NOT NULL DEFAULT 'warm'
+                    CHECK(tier IN ('hot', 'warm', 'cold')),
+                salience_score REAL NOT NULL DEFAULT 0.5,
+                access_count INTEGER NOT NULL DEFAULT 0,
+                last_accessed_at TEXT,
+                promoted_at TEXT,
+                promotion_source TEXT DEFAULT 'auto',
+                decay_factor REAL NOT NULL DEFAULT 0.01,
+                base_importance REAL NOT NULL DEFAULT 0.5,
+                FOREIGN KEY (observation_id) REFERENCES observations(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_tiers_tier ON knowledge_tiers(tier);
+            CREATE INDEX IF NOT EXISTS idx_tiers_salience
+                ON knowledge_tiers(salience_score DESC);
+
+            CREATE TABLE IF NOT EXISTS token_budgets (
+                scope TEXT PRIMARY KEY,
+                budget_tokens INTEGER NOT NULL DEFAULT 4000,
+                used_tokens INTEGER NOT NULL DEFAULT 0,
+                last_reset TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS pattern_store (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pattern_hash TEXT UNIQUE NOT NULL,
+                pattern_text TEXT NOT NULL,
+                pattern_type TEXT NOT NULL,
+                occurrence_count INTEGER NOT NULL DEFAULT 1,
+                first_seen TEXT NOT NULL,
+                last_seen TEXT NOT NULL,
+                confidence REAL NOT NULL DEFAULT 0.5,
+                source_entity_type TEXT,
+                metadata TEXT DEFAULT '{}'
+            );
+            CREATE INDEX IF NOT EXISTS idx_pattern_type ON pattern_store(pattern_type);
+
+            CREATE TABLE IF NOT EXISTS retrieval_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                query_hash TEXT NOT NULL,
+                observation_id INTEGER NOT NULL,
+                similarity REAL,
+                was_used INTEGER NOT NULL DEFAULT 0,
+                feedback TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (observation_id) REFERENCES observations(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_ret_query
+                ON retrieval_events(query_hash, created_at);
+
+            CREATE TABLE IF NOT EXISTS trust_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                observation_id INTEGER NOT NULL,
+                reason TEXT NOT NULL,
+                old_trust REAL NOT NULL,
+                new_trust REAL NOT NULL,
+                delta REAL NOT NULL,
+                note TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (observation_id) REFERENCES observations(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS observation_privacy (
+                observation_id INTEGER PRIMARY KEY,
+                privacy_level TEXT NOT NULL DEFAULT 'public'
+                    CHECK(privacy_level IN ('public', 'private', 'sensitive', 'redacted')),
+                tagged_by TEXT DEFAULT 'agent',
+                FOREIGN KEY (observation_id) REFERENCES observations(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS access_patterns (
+                from_observation_id INTEGER NOT NULL,
+                to_observation_id INTEGER NOT NULL,
+                transition_count INTEGER NOT NULL DEFAULT 1,
+                probability REAL NOT NULL DEFAULT 0.0,
+                last_seen TEXT NOT NULL DEFAULT (datetime('now')),
+                PRIMARY KEY (from_observation_id, to_observation_id),
+                FOREIGN KEY (from_observation_id) REFERENCES observations(id) ON DELETE CASCADE,
+                FOREIGN KEY (to_observation_id) REFERENCES observations(id) ON DELETE CASCADE
             );
         """)
         self._conn.commit()
@@ -530,15 +634,110 @@ class MemoryStore:
     # --- Observations ---
 
     def add_observation(self, entity_id: int, text: str,
-                        scope: str = "global") -> int:
-        """Add a free-text observation to an entity. Returns observation ID."""
+                        scope: str = "global",
+                        dedup: bool = True) -> int:
+        """Add a free-text observation to an entity. Returns observation ID.
+
+        When ``dedup=True`` (default), checks for near-duplicates via FTS5
+        before inserting. If a similar existing observation is found (same
+        entity + FTS5 match), the new text is merged instead of duplicated.
+
+        After insert, initializes a ``knowledge_tiers`` row (tier='warm',
+        salience=0.5) so the observation participates in the tier lifecycle.
+        """
+        now = self._now()
         with self._auto_commit():
+            # Dedup: check for similar existing observations on the same entity
+            if dedup and self._has_fts:
+                existing_similar = self._find_similar_on_entity(entity_id, text)
+                if existing_similar is not None:
+                    # Merge: keep the longer text
+                    existing_id, existing_text = existing_similar
+                    if len(text) > len(existing_text):
+                        # ponytail: P9 — close valid_time on old version before overwrite
+                        self._conn.execute(
+                            "UPDATE observations SET valid_to = ? WHERE id = ? AND valid_to IS NULL",
+                            (now, existing_id),
+                        )
+                        self._conn.execute(
+                            "UPDATE observations SET text = ? WHERE id = ?",
+                            (text, existing_id),
+                        )
+                    # Update timestamp to reflect fresh access
+                    self._conn.execute(
+                        "UPDATE observations SET created_at = ? WHERE id = ?",
+                        (now, existing_id),
+                    )
+                    # Still initialize tier if missing (with last_accessed_at=now)
+                    self._conn.execute("""
+                        INSERT OR IGNORE INTO knowledge_tiers
+                            (observation_id, tier, salience_score, last_accessed_at)
+                        VALUES (?, 'warm', 0.5, ?)
+                    """, (existing_id, now))
+                    return existing_id
+
             cur = self._conn.execute(
-                "INSERT INTO observations (entity_id, text, scope, created_at) "
-                "VALUES (?, ?, ?, ?)",
-                (entity_id, text, scope, self._now()),
+                "INSERT INTO observations (entity_id, text, scope, created_at, valid_from) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (entity_id, text, scope, now, now),
             )
-        return cur.lastrowid
+            obs_id = cur.lastrowid
+
+            # Initialize knowledge_tiers row for lifecycle participation.
+            # Set last_accessed_at=now so the decay engine doesn't treat
+            # a brand-new observation as "never accessed" and demote it to cold.
+            self._conn.execute("""
+                INSERT OR IGNORE INTO knowledge_tiers
+                    (observation_id, tier, salience_score, last_accessed_at)
+                VALUES (?, 'warm', 0.5, ?)
+            """, (obs_id, now))
+
+            # ponytail: P10 — lazy-embed into vec0 for persistent vector index
+            try:
+                import sqlite_vec
+                self._conn.enable_load_extension(True)
+                sqlite_vec.load(self._conn)
+                from agent_recall.embeddings import get_provider
+                import struct
+                p = get_provider()
+                if p is not None:
+                    vec = p.embed(text)
+                    blob = struct.pack(f'{len(vec)}f', *vec)
+                    self._conn.execute(
+                        "INSERT OR IGNORE INTO observation_embeddings(embedding, observation_id, entity_id) "
+                        "VALUES (?, ?, ?)",
+                        (blob, obs_id, entity_id),
+                    )
+            except Exception:
+                pass  # Best-effort: vec0 may not be available
+
+        return obs_id
+
+    def _find_similar_on_entity(
+        self, entity_id: int, text: str,
+    ) -> tuple[int, str] | None:
+        """FTS5-based near-duplicate check scoped to a single entity.
+
+        Returns (existing_id, existing_text) if a near-duplicate exists,
+        or None if the observation is unique.
+        """
+        import re
+        tokens = re.findall(r'\w{4,}', text.lower())
+        if not tokens:
+            return None
+        fts_terms = " OR ".join(f'"{t}"' for t in tokens[:10])
+        row = self._conn.execute(
+            "SELECT o.id, o.text FROM observations o "
+            "JOIN observations_fts f ON o.id = f.rowid "
+            "WHERE observations_fts MATCH ? "
+            "  AND o.entity_id = ? "
+            "  AND o.archived_at IS NULL "
+            "LIMIT 1",
+            (fts_terms, entity_id),
+        ).fetchone()
+        if row:
+            return (row["id"], row["text"])
+        return None
 
     def get_observations(self, entity_id: int,
                          include_archived: bool = False) -> list[dict]:
@@ -555,6 +754,18 @@ class MemoryStore:
                 (entity_id,),
             ).fetchall()
         return [dict(r) for r in rows]
+
+    # ponytail: P9 — bitemporal snapshot query
+    def get_observation_snapshot(self, observation_id: int, at_time: str) -> dict | None:
+        """Get what was known about an observation at a point in time."""
+        row = self._conn.execute(
+            """SELECT id, entity_id, text, scope, created_at, valid_from, valid_to
+               FROM observations WHERE id = ?
+               AND (valid_from IS NULL OR valid_from <= ?)
+               AND (valid_to IS NULL OR valid_to > ?)""",
+            (observation_id, at_time, at_time),
+        ).fetchone()
+        return dict(row) if row else None
 
     def archive_observation(self, observation_id: int) -> None:
         with self._auto_commit():
@@ -580,7 +791,7 @@ class MemoryStore:
         """Create a directed relation between two entities. Returns relation ID."""
         with self._auto_commit():
             cur = self._conn.execute(
-                "INSERT INTO relations (from_id, to_id, type, scope, context, created_at) "
+                "INSERT OR IGNORE INTO relations (from_id, to_id, type, scope, context, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
                 (from_id, to_id, rel_type, scope, context, self._now()),
             )
@@ -651,16 +862,24 @@ class MemoryStore:
 
     @contextmanager
     def _auto_commit(self):
-        """Context manager: no-op inside transaction, BEGIN IMMEDIATE otherwise."""
+        """Context manager: no-op inside transaction, BEGIN IMMEDIATE otherwise.
+
+        Tracks ``_in_transaction`` to prevent nested ``BEGIN IMMEDIATE``
+        when this context manager is re-entered on the same connection
+        (e.g. ``add_observation`` inside a loop that also does raw DML).
+        """
         if self._in_transaction:
             yield
         else:
             self._conn.execute("BEGIN IMMEDIATE")
+            self._in_transaction = True
             try:
                 yield
                 self._conn.commit()
+                self._in_transaction = False
             except BaseException:
                 self._conn.rollback()
+                self._in_transaction = False
                 raise
 
     def transaction(self) -> _Transaction:
@@ -1013,6 +1232,442 @@ class MemoryStore:
             )
             counts["relations"] = cur.rowcount
         return counts
+
+    # ------------------------------------------------------------------
+    # Tier management (v0.5.0)
+    # ------------------------------------------------------------------
+
+    def set_tier(self, observation_id: int, tier: str,
+                 source: str = "manual") -> None:
+        """Set or update the knowledge tier for an observation."""
+        now = self._now()
+        with self._auto_commit():
+            self._conn.execute("""
+                INSERT INTO knowledge_tiers
+                    (observation_id, tier, promoted_at, promotion_source)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(observation_id) DO UPDATE SET
+                    tier = ?, promoted_at = ?, promotion_source = ?
+            """, (observation_id, tier, now, source, tier, now, source))
+
+    def get_tier(self, observation_id: int) -> str | None:
+        """Get the current tier for an observation."""
+        row = self._conn.execute(
+            "SELECT tier FROM knowledge_tiers WHERE observation_id = ?",
+            (observation_id,),
+        ).fetchone()
+        return row["tier"] if row else None
+
+    def get_hot_cache(self, scope: str, limit: int = 20) -> list[dict]:
+        """Return hot-tier observations in a scope, sorted by salience."""
+        rows = self._conn.execute("""
+            SELECT o.id, o.entity_id, o.text, o.scope, o.created_at,
+                   kt.tier, kt.salience_score, kt.access_count,
+                   kt.last_accessed_at, e.name as entity_name, e.type as entity_type
+            FROM observations o
+            JOIN knowledge_tiers kt ON o.id = kt.observation_id
+            JOIN entities e ON o.entity_id = e.id
+            WHERE kt.tier = 'hot' AND o.scope = ? AND o.archived_at IS NULL
+            ORDER BY kt.salience_score DESC
+            LIMIT ?
+        """, (scope, limit)).fetchall()
+        return [dict(r) for r in rows]
+
+    def update_access(self, observation_id: int) -> None:
+        """Increment access_count and update last_accessed_at.
+
+        Also triggers salience recomputation.
+        """
+        now = self._now()
+        with self._auto_commit():
+            self._conn.execute("""
+                INSERT INTO knowledge_tiers
+                    (observation_id, tier, access_count, last_accessed_at)
+                VALUES (?, 'warm', 1, ?)
+                ON CONFLICT(observation_id) DO UPDATE SET
+                    access_count = access_count + 1,
+                    last_accessed_at = ?
+            """, (observation_id, now, now))
+        self._maybe_maintenance()
+
+    def _maybe_maintenance(self) -> None:
+        """Trigger full maintenance cycle every ~100 writes or after 1 hour.
+
+        Runs: tier rebalance + knowledge promotion + synthesis + trust decay.
+        """
+        self._write_count += 1
+        if self._write_count % 100 != 0:
+            return
+        elapsed = (datetime.now(timezone.utc) - self._last_rebalance).total_seconds()
+        if elapsed < 3600:
+            return
+        try:
+            from agent_recall.knowledge_tiers import KnowledgeTierManager
+            mgr = KnowledgeTierManager(self)
+            mgr.run_full_maintenance()
+            self._last_rebalance = datetime.now(timezone.utc)
+        except Exception:
+            pass  # Maintenance is best-effort; never break the store
+
+    def bulk_update_salience(self) -> int:
+        """Recompute salience for all observations. Returns number updated."""
+        from agent_recall.decay_engine import DecayEngine
+        engine = DecayEngine()
+        result = engine.bulk_update_tiers(self._conn)
+        self._conn.commit()
+        return result["promoted"] + result["demoted"]
+
+    # ------------------------------------------------------------------
+    # Token Budget (v0.5.0)
+    # ------------------------------------------------------------------
+
+    def get_token_budget(self, scope: str) -> int | None:
+        """Get token budget for a scope. Returns None if not set."""
+        row = self._conn.execute(
+            "SELECT budget_tokens FROM token_budgets WHERE scope = ?",
+            (scope,),
+        ).fetchone()
+        return row["budget_tokens"] if row else None
+
+    def set_token_budget(self, scope: str, tokens: int) -> None:
+        """Set token budget for a scope."""
+        with self._auto_commit():
+            self._conn.execute("""
+                INSERT INTO token_budgets (scope, budget_tokens, used_tokens, last_reset)
+                VALUES (?, ?, 0, datetime('now'))
+                ON CONFLICT(scope) DO UPDATE SET budget_tokens = ?
+            """, (scope, tokens, tokens))
+
+    # ------------------------------------------------------------------
+    # Pattern Store (v0.5.0)
+    # ------------------------------------------------------------------
+
+    def upsert_pattern(self, text: str, pattern_type: str,
+                       confidence: float = 0.5,
+                       source_entity_type: str | None = None,
+                       metadata: dict | None = None) -> int:
+        """Insert or update a pattern. Returns pattern ID."""
+        import hashlib
+        pattern_hash = hashlib.sha256(text.encode()).hexdigest()
+        now = self._now()
+        meta_json = json.dumps(metadata or {})
+        with self._auto_commit():
+            self._conn.execute("""
+                INSERT INTO pattern_store
+                    (pattern_hash, pattern_text, pattern_type, first_seen, last_seen,
+                     confidence, source_entity_type, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(pattern_hash) DO UPDATE SET
+                    occurrence_count = occurrence_count + 1,
+                    last_seen = ?,
+                    confidence = MAX(confidence, ?)
+            """, (pattern_hash, text, pattern_type, now, now,
+                  confidence, source_entity_type, meta_json,
+                  now, confidence))
+            row = self._conn.execute(
+                "SELECT id FROM pattern_store WHERE pattern_hash = ?",
+                (pattern_hash,),
+            ).fetchone()
+        return row["id"] if row else -1
+
+    def get_patterns(self, pattern_type: str | None = None,
+                     min_count: int = 1) -> list[dict]:
+        """List patterns, optionally filtered by type and minimum occurrence."""
+        if pattern_type:
+            rows = self._conn.execute(
+                "SELECT * FROM pattern_store "
+                "WHERE pattern_type = ? AND occurrence_count >= ? "
+                "ORDER BY confidence DESC",
+                (pattern_type, min_count),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM pattern_store "
+                "WHERE occurrence_count >= ? "
+                "ORDER BY confidence DESC",
+                (min_count,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_promotion_candidates(self, threshold: int = 3) -> list[dict]:
+        """Get patterns that appear >= threshold times, sorted by confidence."""
+        rows = self._conn.execute(
+            "SELECT * FROM pattern_store WHERE occurrence_count >= ? "
+            "ORDER BY confidence DESC",
+            (threshold,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # Retrieval Events (v0.5.0)
+    # ------------------------------------------------------------------
+
+    def log_retrieval(self, query: str, observation_id: int,
+                      similarity: float) -> int:
+        """Log a retrieval event. Returns event ID."""
+        import hashlib
+        query_hash = hashlib.sha256(query.encode()).hexdigest()
+        with self._auto_commit():
+            cur = self._conn.execute(
+                "INSERT INTO retrieval_events (query_hash, observation_id, similarity) "
+                "VALUES (?, ?, ?)",
+                (query_hash, observation_id, similarity),
+            )
+        return cur.lastrowid
+
+    def log_usage(self, retrieval_id: int, was_used: bool,
+                  feedback: str | None = None) -> None:
+        """Record whether a retrieved observation was actually used."""
+        with self._auto_commit():
+            self._conn.execute(
+                "UPDATE retrieval_events SET was_used = ?, feedback = ? "
+                "WHERE id = ?",
+                (1 if was_used else -1, feedback, retrieval_id),
+            )
+
+    def get_helpfulness(self, observation_id: int) -> float:
+        """Bayesian helpfulness: (used+α)/(retrieved+α+β), α=1, β=3."""
+        row = self._conn.execute(
+            "SELECT "
+            "  COUNT(*) as total, "
+            "  SUM(CASE WHEN was_used = 1 THEN 1 ELSE 0 END) as used "
+            "FROM retrieval_events WHERE observation_id = ?",
+            (observation_id,),
+        ).fetchone()
+        if not row or row["total"] == 0:
+            return 0.25  # conservative prior: 1/(1+3)
+        total = row["total"]
+        used = row["used"] or 0
+        alpha, beta = 1.0, 3.0
+        return (used + alpha) / (total + alpha + beta)
+
+    # ------------------------------------------------------------------
+    # Trust (v0.5.0)
+    # ------------------------------------------------------------------
+
+    def get_trust_score(self, observation_id: int) -> float:
+        """Get current trust score. Initial 1.0 (innocent until proven guilty).
+
+        Returns the latest trust_events.new_trust if available,
+        otherwise 1.0 for observations with no trust history.
+        Range: [0.0, 1.0].
+        """
+        row = self._conn.execute(
+            "SELECT new_trust FROM trust_events "
+            "WHERE observation_id = ? "
+            "ORDER BY created_at DESC LIMIT 1",
+            (observation_id,),
+        ).fetchone()
+        if row:
+            return row["new_trust"]
+        # No trust events → full trust (1.0), not base_importance (0.5)
+        return 1.0
+
+    def adjust_trust(self, observation_id: int, reason: str, delta: float,
+                     note: str | None = None) -> float:
+        """Adjust trust score and record the event. Returns new score."""
+        old = self.get_trust_score(observation_id)
+        new = max(0.0, min(1.0, old + delta))
+        with self._auto_commit():
+            self._conn.execute(
+                "INSERT INTO trust_events "
+                "(observation_id, reason, old_trust, new_trust, delta, note) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (observation_id, reason, old, new, delta, note),
+            )
+            # Also update base_importance in knowledge_tiers
+            self._conn.execute("""
+                INSERT INTO knowledge_tiers
+                    (observation_id, tier, base_importance)
+                VALUES (?, 'warm', ?)
+                ON CONFLICT(observation_id) DO UPDATE SET
+                    base_importance = ?
+            """, (observation_id, new, new))
+        return new
+
+    def get_trust_history(self, observation_id: int) -> list[dict]:
+        """Get full trust adjustment history for an observation."""
+        rows = self._conn.execute(
+            "SELECT reason, old_trust, new_trust, delta, note, created_at "
+            "FROM trust_events WHERE observation_id = ? "
+            "ORDER BY created_at",
+            (observation_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # Privacy (v0.5.0)
+    # ------------------------------------------------------------------
+
+    def set_privacy(self, observation_id: int, level: str) -> None:
+        """Set privacy level for an observation."""
+        with self._auto_commit():
+            self._conn.execute("""
+                INSERT INTO observation_privacy (observation_id, privacy_level, tagged_by)
+                VALUES (?, ?, 'agent')
+                ON CONFLICT(observation_id) DO UPDATE SET privacy_level = ?
+            """, (observation_id, level, level))
+
+    def get_privacy(self, observation_id: int) -> str:
+        """Get privacy level for an observation (default 'public')."""
+        row = self._conn.execute(
+            "SELECT privacy_level FROM observation_privacy WHERE observation_id = ?",
+            (observation_id,),
+        ).fetchone()
+        return row["privacy_level"] if row else "public"
+
+    # ------------------------------------------------------------------
+    # Access Patterns (v0.5.0)
+    # ------------------------------------------------------------------
+
+    def record_transition(self, from_id: int, to_id: int) -> None:
+        """Record a navigation transition between two observations."""
+        now = self._now()
+        with self._auto_commit():
+            self._conn.execute("""
+                INSERT INTO access_patterns
+                    (from_observation_id, to_observation_id, last_seen)
+                VALUES (?, ?, ?)
+                ON CONFLICT(from_observation_id, to_observation_id) DO UPDATE SET
+                    transition_count = transition_count + 1,
+                    last_seen = ?
+            """, (from_id, to_id, now, now))
+            # Recompute probability
+            total_row = self._conn.execute(
+                "SELECT SUM(transition_count) FROM access_patterns "
+                "WHERE from_observation_id = ?",
+                (from_id,),
+            ).fetchone()
+            total = total_row[0] if total_row and total_row[0] else 1
+            self._conn.execute(
+                "UPDATE access_patterns SET probability = "
+                "CAST(transition_count AS REAL) / ? "
+                "WHERE from_observation_id = ? AND to_observation_id = ?",
+                (total, from_id, to_id),
+            )
+
+    def predict_next(self, current_id: int, top_k: int = 5) -> list[dict]:
+        """Predict most likely next observations via Markov transition."""
+        rows = self._conn.execute("""
+            SELECT ap.to_observation_id, ap.probability, ap.transition_count,
+                   o.text, e.name as entity_name
+            FROM access_patterns ap
+            JOIN observations o ON ap.to_observation_id = o.id
+            JOIN entities e ON o.entity_id = e.id
+            WHERE ap.from_observation_id = ?
+              AND o.archived_at IS NULL
+            ORDER BY ap.probability DESC
+            LIMIT ?
+        """, (current_id, top_k)).fetchall()
+        return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # Timeline (v0.5.0)
+    # ------------------------------------------------------------------
+
+    def get_timeline(self, entity_name: str | None = None,
+                     entity_type: str | None = None,
+                     scope: str | None = None,
+                     since: str | None = None,
+                     until: str | None = None,
+                     limit: int = 20) -> list[dict]:
+        """Get observations as a chronological timeline with optional filters."""
+        conditions = ["o.archived_at IS NULL"]
+        params: list = []
+
+        if entity_name:
+            conditions.append("e.name = ?")
+            params.append(entity_name)
+        if entity_type:
+            conditions.append("e.type = ?")
+            params.append(entity_type)
+        if scope:
+            conditions.append("o.scope = ?")
+            params.append(scope)
+        if since:
+            conditions.append("o.created_at >= ?")
+            params.append(since)
+        if until:
+            conditions.append("o.created_at <= ?")
+            params.append(until)
+
+        where = " AND ".join(conditions)
+        rows = self._conn.execute(
+            f"SELECT o.id, o.text, o.scope, o.created_at, "
+            f"e.name as entity_name, e.type as entity_type "
+            f"FROM observations o "
+            f"JOIN entities e ON o.entity_id = e.id "
+            f"WHERE {where} "
+            f"ORDER BY o.created_at DESC LIMIT ?",
+            params + [limit],
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # Semantic Dedup (v0.5.0)
+    # ------------------------------------------------------------------
+
+    def find_similar_observations(self, text: str, threshold: float = 0.85,
+                                  scope: str | None = None) -> list[dict]:
+        """Find semantically similar existing observations (FTS5-based).
+
+        Uses FTS5 for rough matching. For vector-based similarity,
+        use ``search_vector`` after embedding.
+        """
+        if not self._has_fts:
+            return []
+        # Extract key terms for FTS query
+        import re
+        tokens = re.findall(r'\w{4,}', text.lower())
+        if not tokens:
+            return []
+        fts_terms = " OR ".join(
+            f'"{t}"' for t in tokens[:10]
+        )
+        scope_filter = "AND o.scope = ?" if scope else ""
+        params: list = [threshold] if not scope else [scope, threshold]
+        # threshold not directly used in FTS, we trust FTS ranking
+        rows = self._conn.execute(
+            f"SELECT o.id, o.entity_id, o.text, o.scope, o.created_at, "
+            f"e.name as entity_name "
+            f"FROM observations o "
+            f"JOIN observations_fts f ON o.id = f.rowid "
+            f"JOIN entities e ON o.entity_id = e.id "
+            f"WHERE observations_fts MATCH ? "
+            f"  AND o.archived_at IS NULL "
+            f"  {scope_filter} "
+            f"LIMIT 10",
+            params if scope else [threshold],
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def merge_observations(self, keep_id: int, merge_id: int) -> None:
+        """Merge merge_id into keep_id: archive merge_id, keep longer text."""
+        if keep_id == merge_id:
+            return
+        with self._auto_commit():
+            # Get texts
+            keep = self._conn.execute(
+                "SELECT text FROM observations WHERE id = ?", (keep_id,)
+            ).fetchone()
+            merge = self._conn.execute(
+                "SELECT text FROM observations WHERE id = ?", (merge_id,)
+            ).fetchone()
+            if keep and merge and len(merge["text"]) > len(keep["text"]):
+                self._conn.execute(
+                    "UPDATE observations SET text = ? WHERE id = ?",
+                    (merge["text"], keep_id),
+                )
+            # Archive merge_id
+            self._conn.execute(
+                "UPDATE observations SET archived_at = ? WHERE id = ?",
+                (self._now(), merge_id),
+            )
+            # Update relations pointing to merge_id → keep_id
+            self._conn.execute(
+                "UPDATE relations SET to_id = ? WHERE to_id = ?",
+                (keep_id, merge_id),
+            )
 
     def __enter__(self) -> "MemoryStore":
         return self

@@ -68,6 +68,15 @@ mcp = FastMCP(
     ),
 )
 
+# ponytail: warm embedding model on startup so first tool call doesn't timeout
+try:
+    from agent_recall.embeddings import get_provider as _get_provider
+    _emb = _get_provider()
+    if _emb:
+        _emb.embed("warmup")
+except Exception:
+    pass
+
 
 @mcp.tool()
 def create_entities(entities: list[dict]) -> str:

@@ -36,6 +36,66 @@ class AgentConfig:
 
 
 @dataclass
+class EmbeddingConfig:
+    """Configuration for embedding provider.
+
+    Args:
+        provider: 'sentence_transformers' | 'ollama' | 'openai' | None.
+        model: Model name (default all-MiniLM-L6-v2, 384d, ~23MB).
+        dimension: Embedding vector dimension.
+        batch_size: Number of texts to embed at once.
+        device: 'cpu' or 'cuda'.
+    """
+    provider: str | None = "sentence_transformers"
+    model: str = "all-MiniLM-L6-v2"
+    dimension: int = 384
+    batch_size: int = 32
+    device: str = "cpu"
+
+
+@dataclass
+class TierConfig:
+    """Knowledge tier configuration.
+
+    Args:
+        hot_limit: Maximum hot-cache items per scope.
+        hot_promotion_accesses: Accesses needed to promote to hot.
+        hot_demotion_days: Days without access before hot→warm.
+        warm_promotion_accesses: Accesses needed to promote from cold.
+        decay_check_interval_hours: Interval for automatic tier rebalancing.
+    """
+    hot_limit: int = 20
+    hot_promotion_accesses: int = 3
+    hot_demotion_days: int = 14
+    warm_promotion_accesses: int = 5
+    decay_check_interval_hours: int = 24
+
+
+@dataclass
+class AutoCaptureConfig:
+    """Configuration for automatic pattern capture from tool output.
+
+    Args:
+        enabled: Whether PostToolUse auto-capture is on.
+        async_write: Use daemon thread for non-blocking writes.
+        min_confidence: Minimum confidence to save a captured pattern.
+        ner_enabled: Whether to use DistilBERT NER (lazy load).
+        ner_confidence: Minimum NER confidence.
+        pattern_types: Which extractor types to run.
+    """
+    enabled: bool = True
+    async_write: bool = True
+    min_confidence: float = 0.6
+    ner_enabled: bool = True
+    ner_confidence: float = 0.7
+    pattern_types: list[str] = field(default_factory=lambda: [
+        "import", "fact", "command", "code", "code_block",
+        "decision", "architecture", "tech_stack", "explanation",
+        "insight", "config", "dependency", "api_endpoint",
+    ])
+
+
+@dataclass
 class MemoryConfig:
     db_path: Path = field(default_factory=lambda: DEFAULT_DB_PATH)
     cache_dir: Path = field(default_factory=lambda: DEFAULT_CACHE_DIR)
@@ -49,6 +109,15 @@ class MemoryConfig:
     vault_dir: Path | None = None
     vault_task_header: str = "## Tasks"
     vault_auto_commit: bool = True
+    # v0.5.0 additions
+    embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
+    tier: TierConfig = field(default_factory=TierConfig)
+    auto_capture: AutoCaptureConfig = field(default_factory=AutoCaptureConfig)
+    budget_default: int = 4000
+    hyde_enabled: bool = True
+    surgical_trim_enabled: bool = True
+    web_viewer_port: int = 37777
+    web_viewer_enabled: bool = False
 
     def known_scopes(self) -> set[str]:
         """Return all valid scope strings from this configuration.

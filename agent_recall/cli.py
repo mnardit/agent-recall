@@ -379,3 +379,153 @@ def delete(ctx, entity_name, yes):
             click.confirm(f"Delete entity '{entity_name}' and all its data?", abort=True)
         store.delete_entity(entity_id)
         click.echo(f"Deleted: {entity_name}")
+
+
+# ══════════════════════════════════════════════
+# v0.5.0: Extended CLI commands
+# ══════════════════════════════════════════════
+
+
+@main.command("vector-search")
+@click.argument("query")
+@click.option("--limit", type=int, default=10, help="Max results (default: 10).")
+@click.option("--min-score", type=float, default=0.5, help="Minimum similarity score.")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
+@click.pass_context
+def vector_search(ctx, query, limit, min_score, as_json):
+    """Semantic vector search across observations (FTS5 fallback)."""
+    from agent_recall.vector_search import VectorSearchEngine
+    from agent_recall.embeddings import get_provider
+    with _store(ctx.obj["config"]) as store:
+        provider = get_provider()
+        engine = VectorSearchEngine(store, provider)
+        try:
+            results = engine.hybrid_search(query, limit=limit, scope="global")
+        except Exception:
+            results = engine.search(query, limit=limit, min_score=min_score, scope="global")
+        if as_json:
+            click.echo(json.dumps(results, ensure_ascii=False, indent=2))
+        else:
+            for r in results:
+                score = r.get("fusion_score") or r.get("similarity", 0)
+                click.echo(f"  [{score:.3f}] [{r.get('entity_name', '?')}] {r.get('text', '')[:120]}")
+
+
+@main.command("timeline")
+@click.option("--entity", "entity_name", default=None, help="Filter by entity name.")
+@click.option("--type", "entity_type", default=None, help="Filter by entity type.")
+@click.option("--since", default=None, help="ISO date lower bound (e.g., 2026-06-01).")
+@click.option("--until", default=None, help="ISO date upper bound.")
+@click.option("--limit", type=int, default=20, help="Max results (default: 20).")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
+@click.pass_context
+def timeline(ctx, entity_name, entity_type, since, until, limit, as_json):
+    """Show chronological timeline of observations."""
+    with _store(ctx.obj["config"]) as store:
+        results = store.get_timeline(
+            entity_name=entity_name, entity_type=entity_type,
+            since=since, until=until, limit=limit,
+        )
+        if as_json:
+            click.echo(json.dumps(results, ensure_ascii=False, indent=2))
+        else:
+            for r in results:
+                ts = r.get("created_at", "")[:19]
+                name = r.get("entity_name", "?")
+                click.echo(f"  [{ts}] {name}: {r.get('text', '')[:150]}")
+
+
+@main.command("hot-cache")
+@click.option("--scope", default=None, help="Scope to query (default: from env).")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
+@click.pass_context
+def hot_cache(ctx, scope, as_json):
+    """Show current hot cache status and tier distribution."""
+    from agent_recall.knowledge_tiers import KnowledgeTierManager
+    scope = scope or os.environ.get("AGENT_RECALL_SLUG") or "global"
+    with _store(ctx.obj["config"]) as store:
+        mgr = KnowledgeTierManager(store)
+        status = mgr.status(scope)
+        if as_json:
+            click.echo(json.dumps(status, ensure_ascii=False, indent=2))
+        else:
+            click.echo(f"Scope: {scope}")
+            click.echo(f"Hot items: {status['hot_count']}")
+            for item in status.get("hot_items", [])[:10]:
+                click.echo(f"  • {item}")
+            click.echo(f"\nTier distribution:")
+            for tier, info in sorted(status.get("tiers", {}).items()):
+                click.echo(f"  {tier}: {info['count']} (avg salience: {info['avg_salience']})")
+
+
+@main.command("promote")
+@click.argument("observation_id", type=int)
+@click.argument("tier", type=click.Choice(["hot", "warm", "cold"]))
+@click.pass_context
+def promote(ctx, observation_id, tier):
+    """Promote/demote an observation to a knowledge tier."""
+    from agent_recall.knowledge_tiers import KnowledgeTierManager
+    with _store(ctx.obj["config"]) as store:
+        mgr = KnowledgeTierManager(store)
+        mgr.promote(observation_id, tier, source="cli")
+        click.echo(f"Observation #{observation_id} → {tier}")
+
+
+@main.command("synthesize")
+@click.option("--scope", default=None, help="Scope to synthesize (default: from env).")
+@click.option("--since-days", type=int, default=7, help="Days to look back (default: 7).")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
+@click.pass_context
+def synthesize(ctx, scope, since_days, as_json):
+    """Cross-source synthesis: discover themes, patterns, and contradictions."""
+    from agent_recall.synthesis import Synthesizer
+    scope = scope or os.environ.get("AGENT_RECALL_SLUG") or "global"
+    with _store(ctx.obj["config"]) as store:
+        syn = Synthesizer(store)
+        result = syn.synthesize(scope, since_days=since_days)
+        if as_json:
+            click.echo(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        else:
+            click.echo(f"Synthesis for '{scope}' (last {since_days}d):")
+            click.echo(f"\n{result.get('summary', 'No summary.')}")
+            if result.get("themes"):
+                click.echo("\nThemes:")
+                for t in result["themes"]:
+                    click.echo(f"  • {t['name']} (x{t['count']})")
+            if result.get("patterns"):
+                click.echo("\nPatterns:")
+                for p in result["patterns"]:
+                    click.echo(f"  • {p['description']} ({p['confidence']:.2f})")
+
+
+@main.command("trust")
+@click.argument("observation_id", type=int)
+@click.option("--reason", required=True, type=click.Choice([
+    "used_correctly", "explicitly_confirmed", "high_similarity_hit",
+    "cross_validated", "outdated", "partially_incorrect",
+    "factually_wrong", "superseded", "low_utility",
+    "contradiction_resolved",
+]), help="Reason for trust adjustment.")
+@click.option("--note", default=None, help="Optional note for the trust event.")
+@click.pass_context
+def trust(ctx, observation_id, reason, note):
+    """Adjust the trust score of an observation."""
+    from agent_recall.trust import TrustEngine, TrustReason
+    with _store(ctx.obj["config"]) as store:
+        engine = TrustEngine(store)
+        new_trust = engine.adjust(observation_id, TrustReason(reason), note)
+        click.echo(f"Observation #{observation_id} trust: {new_trust:.4f} "
+                   f"({reason})")
+
+
+@main.command("rebalance")
+@click.option("--scope", default=None, help="Scope to rebalance (default: all).")
+@click.pass_context
+def rebalance(ctx, scope):
+    """Run tier decay check and rebalance (auto-promote/demote)."""
+    from agent_recall.knowledge_tiers import KnowledgeTierManager
+    with _store(ctx.obj["config"]) as store:
+        mgr = KnowledgeTierManager(store)
+        result = mgr.check_and_rebalance(scope)
+        click.echo(f"Rebalanced: {result['promoted']} promoted, "
+                   f"{result['demoted']} demoted")
